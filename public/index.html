@@ -2,61 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Menorah Parade Music</title>
+  <title>Menorah Parade Music Sync</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      padding: 1.5rem;
-      max-width: 600px;
-      margin: 0 auto;
-      text-align: center;
-    }
-    button {
-      padding: 0.75rem 1.25rem;
-      font-size: 1rem;
-      cursor: pointer;
-      margin-top: 0.5rem;
-    }
-    input {
-      padding: 0.5rem;
-      font-size: 1rem;
-      width: 100%;
-      max-width: 320px;
-      margin-top: 0.25rem;
-    }
-    #status {
-      margin: 1rem 0;
-      min-height: 2rem;
-    }
-    .section {
-      margin-bottom: 1.5rem;
-    }
+    body { font-family: sans-serif; padding: 20px; text-align: center; max-width: 500px; margin: auto; }
+    input, button { font-size: 1rem; padding: 10px; width: 100%; margin-top: 10px; }
+    #status { margin-top: 20px; min-height: 30px; }
   </style>
 </head>
 <body>
-  <h1>Menorah Parade Music</h1>
 
-  <p id="status">Connecting…</p>
+<h2>Menorah Parade Music</h2>
+<p id="status">Connecting…</p>
 
-  <div class="section">
-    <label for="nameInput">
-      Family name <strong>(required to arm the system)</strong>:
-    </label>
-    <br>
-    <input id="nameInput" type="text" placeholder="Family name">
-    <br>
-    <button id="saveNameBtn">Save family name</button>
-    <p id="nameHint">
-      Please enter your <strong>family name</strong> and tap “Save family name”.
-      Then you’ll be able to arm the music on this device.
-    </p>
-  </div>
+<div>
+  <label>Family name (required to arm the system):</label>
+  <input id="nameInput" type="text" placeholder="Family name">
+  <button id="saveNameBtn">Save Family Name</button>
+</div>
 
-  <div class="section">
-    <button id="armBtn" disabled>Arm Audio</button>
-  </div>
+<button id="armBtn" disabled>ARM Audio</button>
 
-  <script src="client.js"></script>
+<script src="client.js"></script>
 </body>
 </html>

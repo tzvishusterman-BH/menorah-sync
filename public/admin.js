@@ -1,135 +1,62 @@
-// ADMIN script with PIN gate + connected clients list
-
-let ws;
-const localTimeEl = document.getElementById("localTime");
-const delaySecondsInput = document.getElementById("delaySeconds");
-const startBtn = document.getElementById("startBtn");
-const stopBtn = document.getElementById("stopBtn");
-const statusEl = document.getElementById("status");
+const PIN = "130865";
 
 const pinScreen = document.getElementById("pinScreen");
 const pinInput = document.getElementById("pinInput");
-const pinBtn = document.getElementById("pinBtn");
+const enterBtn = document.getElementById("enterPinBtn");
 const pinError = document.getElementById("pinError");
-const adminContent = document.getElementById("adminContent");
 
-const clientCountEl = document.getElementById("clientCount");
-const clientListEl = document.getElementById("clientList");
+const adminPanel = document.getElementById("adminPanel");
+const delaySeconds = document.getElementById("delaySeconds");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const clientList = document.getElementById("clientList");
 
-// CHANGE THIS IF YOU EVER WANT A NEW PIN
-const ADMIN_PIN = "130865";
-
-function logStatus(msg) {
-  console.log(msg);
-  statusEl.textContent = msg;
-}
-
-function getWSUrl() {
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${location.host}`;
-}
-
-function updateLocalTime() {
-  const now = new Date();
-  localTimeEl.textContent = now.toLocaleTimeString();
-}
-
-setInterval(updateLocalTime, 1000);
-updateLocalTime();
+let ws;
 
 function connectWS() {
-  ws = new WebSocket(getWSUrl());
+  ws = new WebSocket(
+    location.protocol === "https:"
+      ? `wss://${location.host}`
+      : `ws://${location.host}`
+  );
 
   ws.onopen = () => {
-    console.log("Admin WebSocket opened");
     ws.send(JSON.stringify({ type: "hello", role: "admin" }));
-    logStatus("Connected as admin.");
   };
 
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
 
-    if (msg.type === "pong") {
-      // Not used for now
-    } else if (msg.type === "clients") {
-      updateClientList(msg.clients || []);
+    if (msg.type === "clients") {
+      updateClientList(msg.clients);
     }
-  };
-
-  ws.onclose = () => {
-    logStatus("Disconnected from server.");
-  };
-
-  ws.onerror = (err) => {
-    console.error("Admin WebSocket error", err);
   };
 }
 
-function updateClientList(clients) {
-  clientCountEl.textContent = `Connected: ${clients.length}`;
-  clientListEl.innerHTML = "";
-  clients.forEach((c) => {
+function updateClientList(list) {
+  clientList.innerHTML = "";
+  list.forEach((c) => {
     const li = document.createElement("li");
     li.textContent = `${c.id}. ${c.name}`;
-    clientListEl.appendChild(li);
+    clientList.appendChild(li);
   });
 }
 
-// PIN handling
-pinBtn.addEventListener("click", () => {
-  const entered = (pinInput.value || "").trim();
-  if (entered === ADMIN_PIN) {
-    pinError.textContent = "";
+enterBtn.addEventListener("click", () => {
+  if (pinInput.value.trim() === PIN) {
     pinScreen.style.display = "none";
-    adminContent.style.display = "block";
+    adminPanel.style.display = "block";
     connectWS();
   } else {
-    pinError.textContent = "Incorrect PIN.";
+    pinError.textContent = "Incorrect PIN";
   }
 });
 
-pinInput.addEventListener("keyup", (e) => {
-  if (e.key === "Enter") {
-    pinBtn.click();
-  }
-});
-
-// Start button
 startBtn.addEventListener("click", () => {
-  const delaySec = Number(delaySecondsInput.value || "10");
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    logStatus("Not connected to server.");
-    return;
-  }
-  if (delaySec <= 0) {
-    logStatus("Delay must be > 0");
-    return;
-  }
-
-  const delayMs = delaySec * 1000;
-
-  ws.send(
-    JSON.stringify({
-      type: "start",
-      delayMs
-    })
-  );
-
-  logStatus("Sent start command for " + delaySec + " seconds from now.");
+  const ms = Number(delaySeconds.value) * 1000;
+  ws.send(JSON.stringify({ type: "start", delayMs: ms }));
 });
 
-// Stop button
 stopBtn.addEventListener("click", () => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    logStatus("Not connected to server.");
-    return;
-  }
-
-  ws.send(
-    JSON.stringify({
-      type: "stop"
-    })
-  );
-
-  logStatus("Sent STOP command. All clients should end playback.");
+  ws.send(JSON.stringify({ type: "stop" }));
 });

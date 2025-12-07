@@ -1,16 +1,14 @@
-// CLIENT (listener) script with iOS fallback, late join support,
-// STOP handling, and required family name before ARM
-
+// --- STATE ---
 let ws;
 let audioCtx;
 let audioBuffer = null;
-let htmlAudio = null; // for iOS fallback
-let timeOffset = 0; // serverTime - clientTime (ms)
+let htmlAudio = null;
+let timeOffset = 0;
 let armed = false;
-let serverStartTime = null; // last known start time from server
-let currentSource = null; // Web Audio BufferSource
+let serverStartTime = null;
+let currentSource = null;
 
-// name + state for enabling ARM
+// name state
 let clientName = "";
 let hasName = false;
 let audioLoaded = false;
@@ -21,73 +19,29 @@ const armBtn = document.getElementById("armBtn");
 const nameInput = document.getElementById("nameInput");
 const saveNameBtn = document.getElementById("saveNameBtn");
 
-function logStatus(msg) {
-  console.log(msg);
-  statusEl.textContent = msg;
-}
-
-// Basic iOS detection
+// iOS detection
 const isIOS =
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.userAgent.includes("Mac") && "ontouchend" in document);
 
+function logStatus(m) {
+  console.log(m);
+  statusEl.textContent = m;
+}
+
 function getWSUrl() {
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${location.host}`;
+  return location.protocol === "https:"
+    ? `wss://${location.host}`
+    : `ws://${location.host}`;
 }
 
-function connectWS() {
-  ws = new WebSocket(getWSUrl());
-
-  ws.onopen = () => {
-    console.log("WebSocket opened");
-    wsReady = true;
-    ws.send(JSON.stringify({ type: "hello", role: "client" }));
-
-    // If we already know the name (user typed it before WS was ready), send it now.
-    if (hasName && clientName.trim().length > 0) {
-      sendNameRegistration();
-    }
-
-    logStatus("Connected. Syncing clock…");
-    runClockSync().then(() => {
-      logStatus("Clock synced. Loading audio…");
-      loadAudio();
-    });
-  };
-
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === "pong") {
-      handlePong(msg);
-    } else if (msg.type === "start") {
-      handleStart(msg.serverStartTime);
-    } else if (msg.type === "late-join") {
-      handleLateJoin(msg.serverStartTime);
-    } else if (msg.type === "stop") {
-      handleStop();
-    }
-  };
-
-  ws.onclose = () => {
-    wsReady = false;
-    logStatus("Disconnected from server. Refresh if needed.");
-  };
-
-  ws.onerror = (err) => {
-    console.error("WebSocket error", err);
-  };
-}
-
-// Enable/disable the ARM button based on state
+// --- ENABLE/DISABLE ARM ---
 function updateArmButtonState() {
   const enable = audioLoaded && hasName && !armed;
   armBtn.disabled = !enable;
-  console.log("updateArmButtonState:", { audioLoaded, hasName, armed, enable });
 }
 
-// CLOCK SYNC
-
+// --- CLOCK SYNC ---
 let pendingPings = [];
 let clockSyncResolve;
 
@@ -95,16 +49,14 @@ function runClockSync(samples = 10) {
   return new Promise((resolve) => {
     clockSyncResolve = resolve;
     window._offsetSamples = [];
-    for (let i = 0; i < samples; i++) {
-      sendPing();
-    }
+    for (let i = 0; i < samples; i++) sendPing();
   });
 }
 
 function sendPing() {
-  const clientSendTime = Date.now();
-  pendingPings.push(clientSendTime);
-  ws.send(JSON.stringify({ type: "ping", clientSendTime }));
+  const t = Date.now();
+  pendingPings.push(t);
+  ws.send(JSON.stringify({ type: "ping", clientSendTime: t }));
 }
 
 function handlePong(msg) {
@@ -114,28 +66,28 @@ function handlePong(msg) {
 
   pendingPings.splice(idx, 1);
 
-  const clientRecvTime = Date.now();
-  const rtt = clientRecvTime - clientSendTime;
-  const clientMid = clientSendTime + rtt / 2;
-  const offsetSample = serverTime - clientMid;
+  const recv = Date.now();
+  const rtt = recv - clientSendTime;
+  const mid = clientSendTime + rtt / 2;
+  const offset = serverTime - mid;
 
-  window._offsetSamples.push({ rtt, offsetSample });
+  window._offsetSamples.push({ rtt, offset });
 
   if (window._offsetSamples.length >= 10 && clockSyncResolve) {
-    const sorted = window._offsetSamples.sort((a, b) => a.rtt - b.rtt);
-    const best = sorted.slice(0, Math.ceil(sorted.length / 2));
-    timeOffset =
-      best.reduce((sum, s) => sum + s.offsetSample, 0) / best.length;
+    const best = window._offsetSamples
+      .sort((a, b) => a.rtt - b.rtt)
+      .slice(0, 5)
+      .map((x) => x.offset);
 
-    console.log("Time offset (server - client):", timeOffset, "ms");
-    logStatus("Clock synced (~" + Math.round(timeOffset) + " ms offset).");
+    timeOffset = best.reduce((a, b) => a + b, 0) / best.length;
 
-    // ✅ THIS WAS MISSING: resolve the promise so loadAudio() can run
+    console.log("OFFSET=", timeOffset);
+    logStatus("Clock synced. Loading audio…");
+
     const resolve = clockSyncResolve;
     clockSyncResolve = null;
     resolve();
   } else if (clockSyncResolve) {
-    // Request another ping until we hit the sample count
     sendPing();
   }
 }
@@ -144,8 +96,7 @@ function getServerNow() {
   return Date.now() + timeOffset;
 }
 
-// AUDIO
-
+// --- AUDIO LOADING ---
 async function loadAudio() {
   try {
     if (isIOS) {
@@ -154,259 +105,121 @@ async function loadAudio() {
 
       htmlAudio.addEventListener("canplaythrough", () => {
         audioLoaded = true;
-        logStatus("Audio loaded. Enter family name & tap ARM.");
+        logStatus("Audio loaded. Enter family name & ARM.");
         updateArmButtonState();
-      });
-
-      htmlAudio.addEventListener("error", (e) => {
-        console.error("Error loading audio on iOS:", e);
-        logStatus("Error loading audio on iOS.");
       });
 
       htmlAudio.load();
     } else {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const res = await fetch("track.mp3");
-      if (!res.ok) {
-        throw new Error("Failed to fetch track.mp3");
-      }
-      const arrayBuffer = await res.arrayBuffer();
-      audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      const arr = await res.arrayBuffer();
+      audioBuffer = await audioCtx.decodeAudioData(arr);
+
       audioLoaded = true;
-      logStatus("Audio loaded. Enter family name & tap ARM.");
+      logStatus("Audio loaded. Enter family name & ARM.");
       updateArmButtonState();
     }
   } catch (err) {
-    console.error("Error loading audio:", err);
-    logStatus("Error loading audio: " + err.message);
+    logStatus("Audio load error: " + err.message);
   }
 }
 
-// NAME HANDLING
-
+// --- SAVE FAMILY NAME ---
 saveNameBtn.addEventListener("click", () => {
-  const name = (nameInput.value || "").trim();
-  if (!name) {
-    logStatus("Please enter your family name before arming.");
-    return;
-  }
+  const name = nameInput.value.trim();
+  if (!name) return logStatus("Please enter family name.");
+
   clientName = name;
   hasName = true;
-  logStatus(
-    `Registered family name: ${clientName}. Once audio is loaded, you can tap ARM.`
-  );
-  updateArmButtonState();
+  logStatus(`Registered: ${clientName}. You may ARM once audio loads.`);
 
-  if (wsReady) {
-    sendNameRegistration();
-  }
+  updateArmButtonState();
+  if (wsReady) sendNameRegistration();
 });
 
 function sendNameRegistration() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (!clientName || !clientName.trim()) return;
-  ws.send(
-    JSON.stringify({
-      type: "register",
-      name: clientName.trim()
-    })
-  );
+  if (!wsReady) return;
+  ws.send(JSON.stringify({ type: "register", name: clientName }));
 }
 
-// ARM BUTTON
-
+// --- ARM BUTTON ---
 armBtn.addEventListener("click", () => {
-  if (!hasName) {
-    logStatus("Please save your family name first.");
-    return;
-  }
+  if (!hasName) return;
 
   if (isIOS) {
-    if (!htmlAudio) {
-      logStatus("Audio not ready yet.");
-      return;
-    }
-    htmlAudio
-      .play()
-      .then(() => {
-        htmlAudio.pause();
-        htmlAudio.currentTime = 0;
-        armed = true;
-        updateArmButtonState();
-
-        if (serverStartTime) {
-          logStatus("Armed (iOS). Joining current track…");
-          scheduleOrJoin();
-        } else {
-          logStatus("Armed (iOS). Waiting for start signal…");
-        }
-      })
-      .catch((err) => {
-        console.error("Error unlocking audio on iOS:", err);
-        logStatus("Tap ARM again to allow audio on iOS.");
-      });
+    htmlAudio.play().then(() => {
+      htmlAudio.pause();
+      htmlAudio.currentTime = 0;
+      finishArm();
+    }).catch(() => logStatus("Tap ARM again to allow audio."));
   } else {
-    if (!audioCtx) {
-      logStatus("Audio context not ready.");
-      return;
-    }
-
-    if (audioCtx.state === "suspended") {
-      audioCtx.resume();
-    }
-
-    armed = true;
-    updateArmButtonState();
-
-    if (serverStartTime) {
-      logStatus("Armed. Joining current track…");
-      scheduleOrJoin();
-    } else {
-      logStatus("Armed. Waiting for start signal…");
-    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    finishArm();
   }
 });
 
-// START / LATE JOIN / STOP
-
-function handleStart(startTimeFromServer) {
-  serverStartTime = startTimeFromServer;
-
-  const serverNow = getServerNow();
-  const msUntilStart = serverStartTime - serverNow;
-
-  if (armed) {
-    scheduleOrJoin();
-  } else {
-    if (msUntilStart > 0) {
-      logStatus(
-        "Start signal received. Track begins soon. Enter family name & tap ARM to be ready."
-      );
-    } else {
-      logStatus(
-        "Track is already playing. Enter family name & tap ARM to join in progress."
-      );
-    }
-  }
+function finishArm() {
+  armed = true;
+  updateArmButtonState();
+  if (serverStartTime) scheduleOrJoin();
+  else logStatus("ARMED. Waiting for start…");
 }
 
-function handleLateJoin(startTimeFromServer) {
-  serverStartTime = startTimeFromServer;
+// --- START HANDLING ---
+function handleStart(t) {
+  serverStartTime = t;
+  const now = getServerNow();
+  const until = t - now;
 
-  const serverNow = getServerNow();
-  const msSinceStart = serverNow - serverStartTime;
+  if (armed) scheduleOrJoin();
+  else logStatus(
+    until > 0
+      ? "Start received. ARM now to join."
+      : "Track already playing. ARM to join late."
+  );
+}
 
-  if (msSinceStart < 0) {
-    if (armed) {
-      scheduleOrJoin();
-    } else {
-      logStatus(
-        "Track scheduled to start soon. Enter family name & tap ARM to be ready."
-      );
-    }
-    return;
-  }
-
-  if (armed) {
-    logStatus("Music already playing. Joining in progress…");
-    scheduleOrJoin();
-  } else {
-    logStatus(
-      "Music already playing. Enter family name & tap ARM to join in progress."
-    );
-  }
+function handleLateJoin(t) {
+  serverStartTime = t;
+  if (armed) scheduleOrJoin();
+  else logStatus("Music already playing. ARM to join.");
 }
 
 function scheduleOrJoin() {
-  if (!serverStartTime) {
-    logStatus("No start time set yet.");
-    return;
-  }
-
-  const serverNow = getServerNow();
-  const msUntilStart = serverStartTime - serverNow;
+  const now = getServerNow();
+  const until = serverStartTime - now;
 
   if (isIOS) {
-    if (!htmlAudio) {
-      logStatus("iOS audio not ready.");
-      return;
-    }
-
-    if (msUntilStart > 0) {
-      logStatus(
-        "Music scheduled to start in " + Math.round(msUntilStart) + " ms."
-      );
-      setTimeout(() => {
-        htmlAudio
-          .play()
-          .catch((err) => {
-            console.error("Error playing audio on iOS:", err);
-            logStatus("Error playing audio on iOS: " + err.message);
-          });
-      }, msUntilStart);
+    if (until > 0) {
+      setTimeout(() => htmlAudio.play(), until);
     } else {
-      const offsetSeconds = -msUntilStart / 1000;
-      console.log("iOS joining in progress at offset (s):", offsetSeconds);
-      htmlAudio.currentTime = offsetSeconds;
-      htmlAudio
-        .play()
-        .catch((err) => {
-          console.error("Error playing audio on iOS:", err);
-          logStatus("Error playing audio on iOS: " + err.message);
-        });
+      htmlAudio.currentTime = -until / 1000;
+      htmlAudio.play();
     }
   } else {
-    if (!audioCtx || !audioBuffer) {
-      logStatus("Audio not ready on this device.");
-      return;
-    }
-
     if (currentSource) {
-      try {
-        currentSource.stop();
-      } catch (e) {}
-      currentSource = null;
+      try { currentSource.stop(); } catch {}
     }
 
-    if (msUntilStart > 0) {
-      const secondsUntilStart = msUntilStart / 1000;
-      const when = audioCtx.currentTime + secondsUntilStart;
+    const src = audioCtx.createBufferSource();
+    src.buffer = audioBuffer;
+    src.connect(audioCtx.destination);
 
-      const source = audioCtx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioCtx.destination);
-      source.start(when);
-      currentSource = source;
-
-      logStatus(
-        "Music scheduled to start in " + Math.round(msUntilStart) + " ms."
-      );
-      console.log(
-        "Scheduling start at audioCtx.currentTime +",
-        secondsUntilStart
-      );
+    if (until > 0) {
+      src.start(audioCtx.currentTime + until / 1000);
     } else {
-      const offsetSeconds = -msUntilStart / 1000;
-      console.log("Joining in progress at offset (s):", offsetSeconds);
-
-      const when = audioCtx.currentTime + 0.1;
-      const source = audioCtx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioCtx.destination);
-      source.start(when, offsetSeconds);
-      currentSource = source;
-
-      logStatus("Joining in progress…");
+      src.start(audioCtx.currentTime + 0.05, -until / 1000);
     }
+
+    currentSource = src;
   }
+
+  logStatus("Playing (synced).");
 }
 
+// --- STOP HANDLING ---
 function handleStop() {
-  console.log("Received STOP from server");
-  stopPlayback();
-}
-
-function stopPlayback() {
   if (isIOS) {
     if (htmlAudio) {
       htmlAudio.pause();
@@ -414,20 +227,38 @@ function stopPlayback() {
     }
   } else {
     if (currentSource) {
-      try {
-        currentSource.stop();
-      } catch (e) {}
+      try { currentSource.stop(); } catch {}
       currentSource = null;
     }
   }
 
-  serverStartTime = null;
   armed = false;
+  serverStartTime = null;
   updateArmButtonState();
 
-  logStatus(
-    "Broadcast ended. Enter family name & tap ARM to be ready for the next track."
-  );
+  logStatus("Broadcast ended. ARM again for next track.");
+}
+
+// --- WEBSOCKET CONNECT ---
+function connectWS() {
+  ws = new WebSocket(getWSUrl());
+
+  ws.onopen = () => {
+    wsReady = true;
+    ws.send(JSON.stringify({ type: "hello", role: "client" }));
+    if (hasName) sendNameRegistration();
+
+    logStatus("Syncing clock…");
+    runClockSync().then(loadAudio);
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "pong") handlePong(msg);
+    if (msg.type === "start") handleStart(msg.serverStartTime);
+    if (msg.type === "late-join") handleLateJoin(msg.serverStartTime);
+    if (msg.type === "stop") handleStop();
+  };
 }
 
 connectWS();

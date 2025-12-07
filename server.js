@@ -7,26 +7,23 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Serve static files from /public
 app.use(express.static(path.join(__dirname, "public")));
 
-let clients = new Set();       // regular listeners
-let adminClients = new Set();  // admin connections
+let clients = new Set();
+let adminClients = new Set();
+let clientMeta = new Map();
+let nextClientId = 1;
 
-// Approximate length of your track in milliseconds.
-// Example: 8 minutes = 8 * 60 * 1000 = 480000
-// Adjust this to match your real track length.
-const TRACK_DURATION_MS = 8 * 60 * 1000;
+// EXACT TRACK LENGTH
+const TRACK_DURATION_MS = 532000;
 
-// Store info about the currently playing track, or null if nothing playing.
-let currentTrack = null; // { serverStartTime, durationMs }
+let currentTrack = null;
 
-// --- Heartbeat to keep WebSocket connections alive on Render ---
+// Keep Render WebSockets alive
 function heartbeat() {
   this.isAlive = true;
 }
 
-// Ping clients every 30 seconds
 const interval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) return ws.terminate();
@@ -35,52 +32,50 @@ const interval = setInterval(() => {
   });
 }, 30000);
 
-wss.on("close", function close() {
-  clearInterval(interval);
-});
+wss.on("close", () => clearInterval(interval));
 
 wss.on("connection", (ws) => {
   ws.isAlive = true;
   ws.on("pong", heartbeat);
 
-  ws.role = "client"; // default
+  ws.role = "client";
 
   ws.on("message", (message) => {
     let msg;
     try {
       msg = JSON.parse(message);
-    } catch (e) {
-      console.error("Invalid JSON from client:", message);
+    } catch {
       return;
     }
 
-    // First hello message tells us if this is admin or client
+    // Identify role
     if (msg.type === "hello") {
       if (msg.role === "admin") {
         ws.role = "admin";
         adminClients.add(ws);
-        console.log("Admin connected");
+
+        sendClientListToAdmin(ws);
       } else {
         ws.role = "client";
         clients.add(ws);
-        console.log("Client connected");
 
-        // If music is currently playing, tell this new client so they can join late.
+        const id = nextClientId++;
+        clientMeta.set(ws, { id, name: null });
+
+        broadcastClientList();
+
+        // Late join handler
         if (currentTrack) {
           const now = Date.now();
           const start = currentTrack.serverStartTime;
           const end = start + currentTrack.durationMs;
 
           if (now >= start && now <= end) {
-            // Track is in progress: send late-join info
-            ws.send(
-              JSON.stringify({
-                type: "late-join",
-                serverStartTime: currentTrack.serverStartTime
-              })
-            );
+            ws.send(JSON.stringify({
+              type: "late-join",
+              serverStartTime: start
+            }));
           } else if (now > end) {
-            // Track finished; clear state
             currentTrack = null;
           }
         }
@@ -88,65 +83,52 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // Clock sync: client sends ping, server responds with pong + server time
-    if (msg.type === "ping") {
-      const response = {
-        type: "pong",
-        clientSendTime: msg.clientSendTime,
-        serverTime: Date.now()
-      };
-      ws.send(JSON.stringify(response));
+    // Family name registration
+    if (msg.type === "register" && ws.role === "client") {
+      const meta = clientMeta.get(ws);
+      if (meta) {
+        meta.name = (msg.name || "").trim();
+        broadcastClientList();
+      }
       return;
     }
 
-    // Admin sends start command with a delay in ms
-    if (msg.type === "start") {
-      if (ws.role !== "admin") {
-        console.warn("Non-admin tried to send start");
-        return;
-      }
+    // Clock sync
+    if (msg.type === "ping") {
+      ws.send(JSON.stringify({
+        type: "pong",
+        clientSendTime: msg.clientSendTime,
+        serverTime: Date.now()
+      }));
+      return;
+    }
 
-      const delayMs = Number(msg.delayMs || 0);
-      if (delayMs <= 0) {
-        console.warn("Invalid delayMs", delayMs);
-        return;
-      }
+    // Admin START
+    if (msg.type === "start" && ws.role === "admin") {
+      const delay = Number(msg.delayMs);
+      if (!(delay > 0)) return;
 
-      const serverStartTime = Date.now() + delayMs;
+      const serverStartTime = Date.now() + delay;
 
-      console.log("Broadcasting start for", serverStartTime, "(in ms)");
-
-      // Remember that a track is starting now so late joiners can sync in
       currentTrack = {
         serverStartTime,
-        durationMs: 532000
+        durationMs: TRACK_DURATION_MS
       };
 
       broadcastToClients({
         type: "start",
         serverStartTime
       });
-
       return;
     }
 
-    // Admin sends stop command: end the current track
-    if (msg.type === "stop") {
-      if (ws.role !== "admin") {
-        console.warn("Non-admin tried to send stop");
-        return;
-      }
-
-      console.log("Admin requested STOP. Ending current track.");
-
-      // Clear current track state
+    // Admin STOP
+    if (msg.type === "stop" && ws.role === "admin") {
       currentTrack = null;
 
-      // Notify all clients to stop playback
       broadcastToClients({
         type: "stop"
       });
-
       return;
     }
   });
@@ -154,25 +136,51 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     clients.delete(ws);
     adminClients.delete(ws);
-    console.log(
-      "Connection closed. Clients:",
-      clients.size,
-      "Admins:",
-      adminClients.size
-    );
+
+    if (clientMeta.has(ws)) {
+      clientMeta.delete(ws);
+      broadcastClientList();
+    }
   });
 });
 
 function broadcastToClients(obj) {
   const data = JSON.stringify(obj);
   for (const c of clients) {
-    if (c.readyState === WebSocket.OPEN) {
-      c.send(data);
-    }
+    if (c.readyState === WebSocket.OPEN) c.send(data);
+  }
+}
+
+function broadcastClientList() {
+  const list = [];
+  for (const meta of clientMeta.values()) {
+    list.push({
+      id: meta.id,
+      name: meta.name || "Unnamed family"
+    });
+  }
+  const json = JSON.stringify({ type: "clients", clients: list });
+
+  for (const a of adminClients) {
+    if (a.readyState === WebSocket.OPEN) a.send(json);
+  }
+}
+
+function sendClientListToAdmin(ws) {
+  const list = [];
+  for (const meta of clientMeta.values()) {
+    list.push({
+      id: meta.id,
+      name: meta.name || "Unnamed family"
+    });
+  }
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: "clients",
+      clients: list
+    }));
   }
 }
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("Server listening on port", PORT);
-});
+server.listen(PORT, "0.0.0.0", () => console.log("Server running on", PORT));
