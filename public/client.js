@@ -10,7 +10,7 @@ let armed = false;
 let serverStartTime = null; // last known start time from server
 let currentSource = null; // Web Audio BufferSource
 
-// NEW: name + state for enabling ARM
+// name + state for enabling ARM
 let clientName = "";
 let hasName = false;
 let audioLoaded = false;
@@ -81,10 +81,6 @@ function connectWS() {
 
 // Enable/disable the ARM button based on state
 function updateArmButtonState() {
-  // ARM allowed only if:
-  // - audio loaded
-  // - we have a family name
-  // - not already armed
   const enable = audioLoaded && hasName && !armed;
   armBtn.disabled = !enable;
   console.log("updateArmButtonState:", { audioLoaded, hasName, armed, enable });
@@ -114,7 +110,7 @@ function sendPing() {
 function handlePong(msg) {
   const { clientSendTime, serverTime } = msg;
   const idx = pendingPings.indexOf(clientSendTime);
-  if (idx === -1) return; // not found / already processed
+  if (idx === -1) return;
 
   pendingPings.splice(idx, 1);
 
@@ -125,7 +121,6 @@ function handlePong(msg) {
 
   window._offsetSamples.push({ rtt, offsetSample });
 
-  // When we have enough samples, compute offset
   if (window._offsetSamples.length >= 10 && clockSyncResolve) {
     const sorted = window._offsetSamples.sort((a, b) => a.rtt - b.rtt);
     const best = sorted.slice(0, Math.ceil(sorted.length / 2));
@@ -134,7 +129,11 @@ function handlePong(msg) {
 
     console.log("Time offset (server - client):", timeOffset, "ms");
     logStatus("Clock synced (~" + Math.round(timeOffset) + " ms offset).");
+
+    // ✅ THIS WAS MISSING: resolve the promise so loadAudio() can run
+    const resolve = clockSyncResolve;
     clockSyncResolve = null;
+    resolve();
   } else if (clockSyncResolve) {
     // Request another ping until we hit the sample count
     sendPing();
@@ -142,7 +141,6 @@ function handlePong(msg) {
 }
 
 function getServerNow() {
-  // clientTime + offset
   return Date.now() + timeOffset;
 }
 
@@ -151,7 +149,6 @@ function getServerNow() {
 async function loadAudio() {
   try {
     if (isIOS) {
-      // iOS: use HTMLAudioElement
       htmlAudio = new Audio("track.mp3");
       htmlAudio.preload = "auto";
 
@@ -166,10 +163,8 @@ async function loadAudio() {
         logStatus("Error loading audio on iOS.");
       });
 
-      // Force load
       htmlAudio.load();
     } else {
-      // Non-iOS: use Web Audio API
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const res = await fetch("track.mp3");
       if (!res.ok) {
@@ -187,7 +182,8 @@ async function loadAudio() {
   }
 }
 
-// NEW: handle saving family name
+// NAME HANDLING
+
 saveNameBtn.addEventListener("click", () => {
   const name = (nameInput.value || "").trim();
   if (!name) {
@@ -201,7 +197,6 @@ saveNameBtn.addEventListener("click", () => {
   );
   updateArmButtonState();
 
-  // send registration to server if possible
   if (wsReady) {
     sendNameRegistration();
   }
@@ -226,13 +221,11 @@ armBtn.addEventListener("click", () => {
     return;
   }
 
-  // ARM must be a user gesture
   if (isIOS) {
     if (!htmlAudio) {
       logStatus("Audio not ready yet.");
       return;
     }
-    // iOS "unlock": play then immediately pause so we can play later
     htmlAudio
       .play()
       .then(() => {
@@ -368,7 +361,6 @@ function scheduleOrJoin() {
       return;
     }
 
-    // Stop any previous playback
     if (currentSource) {
       try {
         currentSource.stop();
@@ -397,7 +389,7 @@ function scheduleOrJoin() {
       const offsetSeconds = -msUntilStart / 1000;
       console.log("Joining in progress at offset (s):", offsetSeconds);
 
-      const when = audioCtx.currentTime + 0.1; // tiny delay for safety
+      const when = audioCtx.currentTime + 0.1;
       const source = audioCtx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioCtx.destination);
