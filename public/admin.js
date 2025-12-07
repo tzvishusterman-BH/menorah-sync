@@ -7,10 +7,6 @@ const pinError = document.getElementById("pinError");
 
 const adminPanel = document.getElementById("adminPanel");
 const trackSelect = document.getElementById("trackSelect");
-const delaySeconds = document.getElementById("delaySeconds");
-const startBtn = document.getElementById("startBtn");
-const pauseBtn = document.getElementById("pauseBtn");
-const resumeBtn = document.getElementById("resumeBtn");
 const stopBtn = document.getElementById("stopBtn");
 const seekSlider = document.getElementById("seekSlider");
 const seekLabel = document.getElementById("seekLabel");
@@ -25,7 +21,7 @@ let ws;
 let trackMap = {};
 let currentDuration = 532000;
 
-// ------------- LIVE CLOCK -------------
+// ------------ LIVE CLOCK ------------
 setInterval(() => {
   const d = new Date();
   const hh = d.getHours().toString().padStart(2,"0");
@@ -34,34 +30,33 @@ setInterval(() => {
   localClock.textContent = `${hh}:${mm}:${ss}`;
 }, 1000);
 
-// ------------- FORMATTER -------------
 function formatMs(ms) {
   if (ms < 0) ms = 0;
-  const s = Math.floor(ms/1000);
-  const m = Math.floor(s/60);
-  const ss = (s%60).toString().padStart(2,"0");
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const ss = (s % 60).toString().padStart(2, "0");
   return `${m}:${ss}`;
 }
 
-// ------------- WEBSOCKET -------------
+// ------------ WEBSOCKET ------------
 function connectWS() {
   ws = new WebSocket(
-    location.protocol==="https:"
-    ? `wss://${location.host}`
-    : `ws://${location.host}`
+    location.protocol === "https:"
+      ? `wss://${location.host}`
+      : `ws://${location.host}`
   );
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({type:"hello", role:"admin"}));
+    ws.send(JSON.stringify({ type: "hello", role: "admin" }));
   };
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
 
-    if (msg.type==="tracks") {
+    if (msg.type === "tracks") {
       trackMap = {};
       trackSelect.innerHTML = "";
-      msg.tracks.forEach(t => {
+      msg.tracks.forEach((t) => {
         trackMap[t.id] = t;
         const opt = document.createElement("option");
         opt.value = t.id;
@@ -71,20 +66,20 @@ function connectWS() {
       updateTrackDuration();
     }
 
-    if (msg.type==="state") {
+    if (msg.type === "state") {
       updateState(msg.state);
     }
 
-    if (msg.type==="clients") {
+    if (msg.type === "clients") {
       updateClientList(msg.clients);
     }
   };
 }
 
-// ------------- CLIENT LIST -------------
+// ------------ CLIENT LIST ------------
 function updateClientList(list) {
   clientList.innerHTML = "";
-  list.forEach(c => {
+  list.forEach((c) => {
     const li = document.createElement("li");
     li.innerHTML = `<strong>${c.name || "Unnamed"}</strong>
       – Armed: ${c.armed ? "🟢" : "⚪"}
@@ -93,7 +88,7 @@ function updateClientList(list) {
   });
 }
 
-// ------------- TRACK DURATION -------------
+// ------------ TRACK DURATION ------------
 function updateTrackDuration() {
   const t = trackMap[trackSelect.value];
   if (!t) return;
@@ -104,34 +99,9 @@ function updateTrackDuration() {
 
 trackSelect.onchange = updateTrackDuration;
 
-// ------------- STATE UPDATES -------------
-let countdownInterval = null;
-
+// ------------ STATE UPDATES ------------
 function updateState(st) {
   stateMode.textContent = st.mode;
-
-  // Clear old countdown
-  if (countdownInterval) {
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-  }
-
-  if (st.mode === "scheduled") {
-    countdownInterval = setInterval(() => {
-      const now = Date.now();
-      const diff = st.serverStartTime - now;
-
-      if (diff <= 0) {
-        stateTime.textContent = "Starting!";
-        clearInterval(countdownInterval);
-        countdownInterval = null;
-        return;
-      }
-
-      const secs = Math.ceil(diff / 1000);
-      stateTime.textContent = `Starts in: ${secs}s`;
-    }, 200);
-  }
 
   if (st.mode === "playing") {
     const updater = setInterval(() => {
@@ -139,46 +109,20 @@ function updateState(st) {
         clearInterval(updater);
         return;
       }
-
       const now = Date.now();
       const offset = now - st.serverStartTime;
-
       stateTime.textContent = formatMs(offset);
-
-      // MOVE SEEK SLIDER LIVE
       seekSlider.value = offset;
       seekLabel.textContent = `${formatMs(offset)} / ${formatMs(currentDuration)}`;
     }, 200);
-  }
-
-  if (st.mode === "paused") {
+  } else if (st.mode === "paused") {
     stateTime.textContent = formatMs(st.pausedAt);
+  } else {
+    stateTime.textContent = "00:00";
   }
 }
 
-// ------------- BUTTON HANDLERS -------------
-
-startBtn.onclick = () => {
-  const delay = Number(delaySeconds.value) * 1000;
-  ws.send(JSON.stringify({
-    type: "start",
-    delayMs: delay,
-    trackId: trackSelect.value
-  }));
-};
-
-pauseBtn.onclick = () => {
-  ws.send(JSON.stringify({ type: "pause" }));
-};
-
-resumeBtn.onclick = () => {
-  ws.send(JSON.stringify({ type: "resume" }));
-};
-
-stopBtn.onclick = () => {
-  ws.send(JSON.stringify({ type: "stop" }));
-};
-
+// ------------ BUTTONS ------------
 seekGo.onclick = () => {
   const offset = Number(seekSlider.value);
   ws.send(JSON.stringify({
@@ -191,7 +135,11 @@ seekSlider.oninput = () => {
   seekLabel.textContent = `${formatMs(seekSlider.value)} / ${formatMs(currentDuration)}`;
 };
 
-// ------------- PIN -------------
+stopBtn.onclick = () => {
+  ws.send(JSON.stringify({ type: "stop" }));
+};
+
+// ------------ PIN ------------
 enterPinBtn.onclick = () => {
   if (pinInput.value.trim() === PIN) {
     pinScreen.style.display = "none";

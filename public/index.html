@@ -52,13 +52,13 @@
     position: fixed;
     bottom: 22px;
     right: 22px;
-    width: 70px;
-    height: 70px;
+    width: 60px;
+    height: 60px;
     background: #2bdcff;
-    border-radius: 14px;
+    border-radius: 50%;
     border: none;
     box-shadow: 0 0 12px #2bdcff;
-    font-size: 1rem;
+    font-size: 1.5rem;
     color: #081a33;
     cursor: pointer;
     font-weight: bold;
@@ -88,12 +88,11 @@
 
 <div id="statusBox" class="panel">
   <div>Status: <span id="statusText">Connecting…</span></div>
-  <div>Sync: <span id="syncText">–</span></div>
-  <div>Armed: <span id="armedText">No</span></div>
-  <div>Playback: <span id="playbackText">Idle</span></div>
+  <div>Sync: <span id="syncText">Not synced</span></div>
+  <div>Now Playing: <span id="nowPlayingText">Nothing</span></div>
 </div>
 
-<button id="resyncBtn">Resync</button>
+<button id="resyncBtn">↻</button>
 
 <script src="client.js"></script>
 </body>

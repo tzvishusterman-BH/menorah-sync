@@ -43,9 +43,6 @@
     font-size: 1.1rem;
     cursor: pointer;
   }
-  #startBtn { background: #00e676; color: #081a33; }
-  #pauseBtn { background: #ffeb3b; color: #081a33; }
-  #resumeBtn { background: #03a9f4; color: #081a33; }
   #stopBtn { background: #ff1744; color: #081a33; }
   #seekSlider { width: 100%; margin-top: 15px; }
   ul { list-style: none; padding-left: 0; }
@@ -67,25 +64,16 @@
 <div id="adminPanel" style="display:none;">
 
   <div class="card">
-    <h3>Track Control</h3>
+    <h3>Track & Position</h3>
 
     <label>Track:</label>
     <select id="trackSelect"></select>
 
-    <label>Start in seconds:</label>
-    <input id="delaySeconds" type="number" value="10">
-
-    <button id="startBtn">START</button>
-    <button id="pauseBtn">PAUSE</button>
-    <button id="resumeBtn">RESUME</button>
-    <button id="stopBtn">STOP</button>
-  </div>
-
-  <div class="card">
-    <h3>Seek</h3>
     <input id="seekSlider" type="range" min="0" max="532000" value="0">
     <div>Position: <span id="seekLabel">00:00 / 08:52</span></div>
     <button id="seekGo">SEEK</button>
+
+    <button id="stopBtn">STOP</button>
   </div>
 
   <div class="card">
