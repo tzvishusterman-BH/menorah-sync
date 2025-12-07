@@ -1,4 +1,4 @@
-// CLIENT (listener) script with iOS fallback + late join support
+// CLIENT (listener) script with iOS fallback + late join support + stop
 
 let ws;
 let audioCtx;
@@ -7,6 +7,7 @@ let htmlAudio = null; // for iOS fallback
 let timeOffset = 0; // serverTime - clientTime (ms)
 let armed = false;
 let lateJoinStartTime = null; // serverStartTime if we joined mid-track
+let currentSource = null; // Web Audio BufferSource
 
 const statusEl = document.getElementById("status");
 const armBtn = document.getElementById("armBtn");
@@ -47,6 +48,8 @@ function connectWS() {
       handleStart(msg.serverStartTime);
     } else if (msg.type === "late-join") {
       handleLateJoin(msg.serverStartTime);
+    } else if (msg.type === "stop") {
+      handleStop();
     }
   };
 
@@ -252,10 +255,19 @@ function handleStart(serverStartTime) {
     const secondsUntilStart = msUntilStart / 1000;
     const when = audioCtx.currentTime + secondsUntilStart;
 
+    // Stop any existing playback
+    if (currentSource) {
+      try {
+        currentSource.stop();
+      } catch (e) {}
+      currentSource = null;
+    }
+
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioCtx.destination);
     source.start(when);
+    currentSource = source;
 
     console.log(
       "Scheduling start at audioCtx.currentTime +",
@@ -323,15 +335,51 @@ function joinInProgress() {
       return;
     }
 
+    // Stop any existing playback
+    if (currentSource) {
+      try {
+        currentSource.stop();
+      } catch (e) {}
+      currentSource = null;
+    }
+
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioCtx.destination);
 
     // Start immediately with offset
-    // start(when, offset)
     const when = audioCtx.currentTime + 0.1; // tiny delay to be safe
     source.start(when, offsetSeconds);
+    currentSource = source;
   }
+}
+
+function handleStop() {
+  console.log("Received STOP from server");
+  stopPlayback();
+}
+
+function stopPlayback() {
+  // Stop audio and reset state so user can ARM again
+  if (isIOS) {
+    if (htmlAudio) {
+      htmlAudio.pause();
+      htmlAudio.currentTime = 0;
+    }
+  } else {
+    if (currentSource) {
+      try {
+        currentSource.stop();
+      } catch (e) {}
+      currentSource = null;
+    }
+  }
+
+  lateJoinStartTime = null;
+  armed = false;
+  armBtn.disabled = false;
+
+  logStatus("Playback stopped. Tap ARM to get ready for the next track.");
 }
 
 connectWS();

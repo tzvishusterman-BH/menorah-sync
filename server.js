@@ -7,30 +7,6 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// --- Heartbeat to keep WebSocket connections alive on Render ---
-function heartbeat() {
-  this.isAlive = true;
-}
-
-wss.on("connection", (ws) => {
-  ws.isAlive = true;
-  ws.on("pong", heartbeat);
-});
-
-// Check each connection every 30 seconds
-const interval = setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) return ws.terminate();
-    ws.isAlive = false;
-    ws.ping(); // send a ping to keep the connection open
-  });
-}, 30000);
-
-wss.on("close", function close() {
-  clearInterval(interval);
-});
-
-
 // Serve static files from /public
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -45,8 +21,28 @@ const TRACK_DURATION_MS = 8 * 60 * 1000;
 // Store info about the currently playing track, or null if nothing playing.
 let currentTrack = null; // { serverStartTime, durationMs }
 
+// --- Heartbeat to keep WebSocket connections alive on Render ---
+function heartbeat() {
+  this.isAlive = true;
+}
+
+// Ping clients every 30 seconds
+const interval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on("close", function close() {
+  clearInterval(interval);
+});
+
 wss.on("connection", (ws) => {
   ws.isAlive = true;
+  ws.on("pong", heartbeat);
+
   ws.role = "client"; // default
 
   ws.on("message", (message) => {
@@ -129,6 +125,26 @@ wss.on("connection", (ws) => {
       broadcastToClients({
         type: "start",
         serverStartTime
+      });
+
+      return;
+    }
+
+    // Admin sends stop command: end the current track
+    if (msg.type === "stop") {
+      if (ws.role !== "admin") {
+        console.warn("Non-admin tried to send stop");
+        return;
+      }
+
+      console.log("Admin requested STOP. Ending current track.");
+
+      // Clear current track state
+      currentTrack = null;
+
+      // Notify all clients to stop playback
+      broadcastToClients({
+        type: "stop"
       });
 
       return;

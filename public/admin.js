@@ -4,6 +4,7 @@ let ws;
 const localTimeEl = document.getElementById("localTime");
 const delaySecondsInput = document.getElementById("delaySeconds");
 const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
 const statusEl = document.getElementById("status");
 
 function logStatus(msg) {
@@ -68,6 +69,19 @@ startBtn.addEventListener("click", () => {
   }));
 
   logStatus("Sent start command for " + delaySec + " seconds from now.");
+});
+
+stopBtn.addEventListener("click", () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    logStatus("Not connected to server.");
+    return;
+  }
+
+  ws.send(JSON.stringify({
+    type: "stop"
+  }));
+
+  logStatus("Sent STOP command. All clients should end playback.");
 });
 
 connectWS();
