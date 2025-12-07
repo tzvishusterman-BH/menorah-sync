@@ -1,8 +1,9 @@
-// CLIENT (listener) script
+// CLIENT (listener) script with iOS fallback
 
 let ws;
 let audioCtx;
 let audioBuffer = null;
+let htmlAudio = null; // for iOS fallback
 let timeOffset = 0; // serverTime - clientTime (ms)
 let armed = false;
 
@@ -13,6 +14,11 @@ function logStatus(msg) {
   console.log(msg);
   statusEl.textContent = msg;
 }
+
+// Basic iOS detection
+const isIOS =
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.userAgent.includes("Mac") && "ontouchend" in document);
 
 function getWSUrl() {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
@@ -112,15 +118,35 @@ function getServerNow() {
 
 async function loadAudio() {
   try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const res = await fetch("track.mp3");
-    if (!res.ok) {
-      throw new Error("Failed to fetch track.mp3");
+    if (isIOS) {
+      // iOS: use HTMLAudioElement
+      htmlAudio = new Audio("track.mp3");
+      htmlAudio.preload = "auto";
+
+      htmlAudio.addEventListener("canplaythrough", () => {
+        logStatus("Audio loaded. Tap ARM when ready.");
+        armBtn.disabled = false;
+      });
+
+      htmlAudio.addEventListener("error", (e) => {
+        console.error("Error loading audio on iOS:", e);
+        logStatus("Error loading audio on iOS.");
+      });
+
+      // Force load
+      htmlAudio.load();
+    } else {
+      // Non-iOS: use Web Audio API
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const res = await fetch("track.mp3");
+      if (!res.ok) {
+        throw new Error("Failed to fetch track.mp3");
+      }
+      const arrayBuffer = await res.arrayBuffer();
+      audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      logStatus("Audio loaded. Tap ARM when ready.");
+      armBtn.disabled = false;
     }
-    const arrayBuffer = await res.arrayBuffer();
-    audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    logStatus("Audio loaded. Tap ARM when ready.");
-    armBtn.disabled = false;
   } catch (err) {
     console.error("Error loading audio:", err);
     logStatus("Error loading audio: " + err.message);
@@ -128,25 +154,43 @@ async function loadAudio() {
 }
 
 armBtn.addEventListener("click", () => {
-  if (!audioCtx) return;
+  // ARM must be a user gesture
+  if (isIOS) {
+    if (!htmlAudio) {
+      logStatus("Audio not ready yet.");
+      return;
+    }
+    // iOS "unlock": play then immediately pause so we can play later
+    htmlAudio
+      .play()
+      .then(() => {
+        htmlAudio.pause();
+        htmlAudio.currentTime = 0;
+        armed = true;
+        armBtn.disabled = true;
+        logStatus("Armed (iOS). Waiting for start signal…");
+      })
+      .catch((err) => {
+        console.error("Error unlocking audio on iOS:", err);
+        logStatus("Tap ARM again to allow audio on iOS.");
+      });
+  } else {
+    if (!audioCtx) return;
 
-  // Needed for mobile autoplay restrictions
-  if (audioCtx.state === "suspended") {
-    audioCtx.resume();
+    // Needed for mobile autoplay restrictions
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+
+    armed = true;
+    armBtn.disabled = true;
+    logStatus("Armed. Waiting for start signal…");
   }
-
-  armed = true;
-  armBtn.disabled = true;
-  logStatus("Armed. Waiting for start signal…");
 });
 
 function handleStart(serverStartTime) {
   if (!armed) {
     logStatus("Received start, but audio is not armed. Please reload.");
-    return;
-  }
-  if (!audioBuffer) {
-    logStatus("Received start, but audio not loaded yet.");
     return;
   }
 
@@ -158,19 +202,45 @@ function handleStart(serverStartTime) {
     return;
   }
 
-  const secondsUntilStart = msUntilStart / 1000;
-  const when = audioCtx.currentTime + secondsUntilStart;
-
-  const source = audioCtx.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(audioCtx.destination);
-  source.start(when);
-
   logStatus(
     "Music scheduled to start in " + Math.round(msUntilStart) + " ms."
   );
 
-  console.log("Scheduling start at audioCtx.currentTime +", secondsUntilStart);
+  if (isIOS) {
+    // iOS: use setTimeout + HTMLAudio
+    if (!htmlAudio) {
+      logStatus("iOS audio not ready.");
+      return;
+    }
+    console.log("iOS scheduling start in ms:", msUntilStart);
+    setTimeout(() => {
+      htmlAudio
+        .play()
+        .catch((err) => {
+          console.error("Error playing audio on iOS:", err);
+          logStatus("Error playing audio on iOS: " + err.message);
+        });
+    }, msUntilStart);
+  } else {
+    // Non-iOS: Web Audio scheduling
+    if (!audioBuffer) {
+      logStatus("Received start, but audio not loaded yet.");
+      return;
+    }
+
+    const secondsUntilStart = msUntilStart / 1000;
+    const when = audioCtx.currentTime + secondsUntilStart;
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioCtx.destination);
+    source.start(when);
+
+    console.log(
+      "Scheduling start at audioCtx.currentTime +",
+      secondsUntilStart
+    );
+  }
 }
 
 connectWS();
