@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Menorah Sync – Parade Music</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 1.5rem;
+      max-width: 600px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    button {
+      padding: 0.75rem 1.25rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #status {
+      margin: 1rem 0;
+      min-height: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Menorah Parade Music</h1>
+  <p id="status">Connecting…</p>
+  <button id="armBtn" disabled>Arm Audio</button>
+
+  <script src="client.js"></script>
+</body>
+</html>
