@@ -13,6 +13,14 @@ app.use(express.static(path.join(__dirname, "public")));
 let clients = new Set();       // regular listeners
 let adminClients = new Set();  // admin connections
 
+// Approximate length of your track in milliseconds.
+// Example: 8 minutes = 8 * 60 * 1000 = 480000
+// Adjust this to match your real track length.
+const TRACK_DURATION_MS = 8 * 60 * 1000;
+
+// Store info about the currently playing track, or null if nothing playing.
+let currentTrack = null; // { serverStartTime, durationMs }
+
 wss.on("connection", (ws) => {
   ws.isAlive = true;
   ws.role = "client"; // default
@@ -36,6 +44,26 @@ wss.on("connection", (ws) => {
         ws.role = "client";
         clients.add(ws);
         console.log("Client connected");
+
+        // If music is currently playing, tell this new client so they can join late.
+        if (currentTrack) {
+          const now = Date.now();
+          const start = currentTrack.serverStartTime;
+          const end = start + currentTrack.durationMs;
+
+          if (now >= start && now <= end) {
+            // Track is in progress: send late-join info
+            ws.send(
+              JSON.stringify({
+                type: "late-join",
+                serverStartTime: currentTrack.serverStartTime
+              })
+            );
+          } else if (now > end) {
+            // Track finished; clear state
+            currentTrack = null;
+          }
+        }
       }
       return;
     }
@@ -66,7 +94,13 @@ wss.on("connection", (ws) => {
 
       const serverStartTime = Date.now() + delayMs;
 
-      console.log("Broadcasting start for", serverStartTime, " (in ms) ");
+      console.log("Broadcasting start for", serverStartTime, "(in ms)");
+
+      // Remember that a track is starting now so late joiners can sync in
+      currentTrack = {
+        serverStartTime,
+        durationMs: 532000
+      };
 
       broadcastToClients({
         type: "start",
@@ -80,7 +114,12 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     clients.delete(ws);
     adminClients.delete(ws);
-    console.log("Connection closed. Clients:", clients.size, "Admins:", adminClients.size);
+    console.log(
+      "Connection closed. Clients:",
+      clients.size,
+      "Admins:",
+      adminClients.size
+    );
   });
 });
 

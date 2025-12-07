@@ -1,4 +1,4 @@
-// CLIENT (listener) script with iOS fallback
+// CLIENT (listener) script with iOS fallback + late join support
 
 let ws;
 let audioCtx;
@@ -6,6 +6,7 @@ let audioBuffer = null;
 let htmlAudio = null; // for iOS fallback
 let timeOffset = 0; // serverTime - clientTime (ms)
 let armed = false;
+let lateJoinStartTime = null; // serverStartTime if we joined mid-track
 
 const statusEl = document.getElementById("status");
 const armBtn = document.getElementById("armBtn");
@@ -42,9 +43,10 @@ function connectWS() {
     const msg = JSON.parse(event.data);
     if (msg.type === "pong") {
       handlePong(msg);
-    }
-    if (msg.type === "start") {
+    } else if (msg.type === "start") {
       handleStart(msg.serverStartTime);
+    } else if (msg.type === "late-join") {
+      handleLateJoin(msg.serverStartTime);
     }
   };
 
@@ -168,14 +170,23 @@ armBtn.addEventListener("click", () => {
         htmlAudio.currentTime = 0;
         armed = true;
         armBtn.disabled = true;
-        logStatus("Armed (iOS). Waiting for start signal…");
+
+        if (lateJoinStartTime) {
+          logStatus("Joining in progress (iOS)...");
+          joinInProgress();
+        } else {
+          logStatus("Armed (iOS). Waiting for start signal…");
+        }
       })
       .catch((err) => {
         console.error("Error unlocking audio on iOS:", err);
         logStatus("Tap ARM again to allow audio on iOS.");
       });
   } else {
-    if (!audioCtx) return;
+    if (!audioCtx) {
+      logStatus("Audio context not ready.");
+      return;
+    }
 
     // Needed for mobile autoplay restrictions
     if (audioCtx.state === "suspended") {
@@ -184,13 +195,21 @@ armBtn.addEventListener("click", () => {
 
     armed = true;
     armBtn.disabled = true;
-    logStatus("Armed. Waiting for start signal…");
+
+    if (lateJoinStartTime) {
+      logStatus("Joining in progress…");
+      joinInProgress();
+    } else {
+      logStatus("Armed. Waiting for start signal…");
+    }
   }
 });
 
 function handleStart(serverStartTime) {
   if (!armed) {
-    logStatus("Received start, but audio is not armed. Please reload.");
+    // We might get this before the user arms; remember it as a future start.
+    lateJoinStartTime = null; // clear any previous late join info
+    logStatus("Start signal received. Tap ARM to join.");
     return;
   }
 
@@ -198,7 +217,9 @@ function handleStart(serverStartTime) {
   const msUntilStart = serverStartTime - serverNow;
 
   if (msUntilStart < 0) {
-    logStatus("Start time already passed (" + msUntilStart + " ms).");
+    // Start time already passed => treat as late-join into current track
+    lateJoinStartTime = serverStartTime;
+    joinInProgress();
     return;
   }
 
@@ -240,6 +261,76 @@ function handleStart(serverStartTime) {
       "Scheduling start at audioCtx.currentTime +",
       secondsUntilStart
     );
+  }
+}
+
+function handleLateJoin(serverStartTime) {
+  // Store info that the track is already in progress
+  lateJoinStartTime = serverStartTime;
+
+  const serverNow = getServerNow();
+  const msSinceStart = serverNow - serverStartTime;
+
+  if (msSinceStart < 0) {
+    // Track hasn't started yet; this will be handled by handleStart anyway.
+    logStatus("Track is scheduled to start soon.");
+    return;
+  }
+
+  if (!armed) {
+    logStatus(
+      "Music already playing. Tap ARM to join in progress."
+    );
+  } else {
+    logStatus("Joining track in progress…");
+    joinInProgress();
+  }
+}
+
+function joinInProgress() {
+  if (!lateJoinStartTime) {
+    logStatus("No late-join info available.");
+    return;
+  }
+
+  const serverNow = getServerNow();
+  let msSinceStart = serverNow - lateJoinStartTime;
+
+  if (msSinceStart < 0) {
+    // If somehow negative, just wait for handleStart instead
+    logStatus("Track start is still in the future.");
+    return;
+  }
+
+  const offsetSeconds = msSinceStart / 1000;
+  console.log("Joining in progress at offset (s):", offsetSeconds);
+
+  if (isIOS) {
+    if (!htmlAudio) {
+      logStatus("iOS audio not ready.");
+      return;
+    }
+    htmlAudio.currentTime = offsetSeconds;
+    htmlAudio
+      .play()
+      .catch((err) => {
+        console.error("Error playing audio on iOS:", err);
+        logStatus("Error playing audio on iOS: " + err.message);
+      });
+  } else {
+    if (!audioCtx || !audioBuffer) {
+      logStatus("Audio not ready to join in progress.");
+      return;
+    }
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioCtx.destination);
+
+    // Start immediately with offset
+    // start(when, offset)
+    const when = audioCtx.currentTime + 0.1; // tiny delay to be safe
+    source.start(when, offsetSeconds);
   }
 }
 
