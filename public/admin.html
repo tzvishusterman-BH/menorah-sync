@@ -47,12 +47,7 @@
   #pauseBtn { background: #ffeb3b; color: #081a33; }
   #resumeBtn { background: #03a9f4; color: #081a33; }
   #stopBtn { background: #ff1744; color: #081a33; }
-
-  #seekSlider {
-    width: 100%;
-    margin-top: 15px;
-  }
-
+  #seekSlider { width: 100%; margin-top: 15px; }
   ul { list-style: none; padding-left: 0; }
   li { margin: 6px 0; }
 </style>
@@ -72,7 +67,8 @@
 <div id="adminPanel" style="display:none;">
 
   <div class="card">
-    <h3>Track Settings</h3>
+    <h3>Track Control</h3>
+
     <label>Track:</label>
     <select id="trackSelect"></select>
 
@@ -95,7 +91,8 @@
   <div class="card">
     <h3>Broadcast Status</h3>
     <div>Mode: <span id="stateMode">Idle</span></div>
-    <div>Timestamp: <span id="stateTime">00:00</span></div>
+    <div>Playback Timestamp: <span id="stateTime">00:00</span></div>
+    <div>Local Time: <span id="localClock">--:--:--</span></div>
   </div>
 
   <div class="card">

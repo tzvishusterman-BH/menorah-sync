@@ -52,15 +52,16 @@
     position: fixed;
     bottom: 22px;
     right: 22px;
-    width: 60px;
-    height: 60px;
+    width: 70px;
+    height: 70px;
     background: #2bdcff;
-    border-radius: 50%;
+    border-radius: 14px;
     border: none;
     box-shadow: 0 0 12px #2bdcff;
-    font-size: 1.5rem;
+    font-size: 1rem;
     color: #081a33;
     cursor: pointer;
+    font-weight: bold;
   }
   #statusBox {
     margin-top: 16px;
@@ -79,8 +80,7 @@
 
 <div class="panel">
   <label>Family Name:</label>
-  <input id="nameInput" type="text" placeholder="Your family name">
-  <button id="saveNameBtn">Save Name</button>
+  <input id="nameInput" type="text" placeholder="Family name required">
 
   <button id="armBtn" disabled>ARM Audio</button>
   <button id="pausePlayBtn" style="display:none;">Pause</button>
@@ -93,7 +93,7 @@
   <div>Playback: <span id="playbackText">Idle</span></div>
 </div>
 
-<button id="resyncBtn">↻</button>
+<button id="resyncBtn">Resync</button>
 
 <script src="client.js"></script>
 </body>
