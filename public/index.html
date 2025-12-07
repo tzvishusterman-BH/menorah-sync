@@ -1,27 +1,99 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Menorah Parade Music Sync</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: sans-serif; padding: 20px; text-align: center; max-width: 500px; margin: auto; }
-    input, button { font-size: 1rem; padding: 10px; width: 100%; margin-top: 10px; }
-    #status { margin-top: 20px; min-height: 30px; }
-  </style>
+<meta charset="UTF-8">
+<title>Berlin Menorah Parade 5786 – Sync Client</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+  body {
+    background: #081a33;
+    color: white;
+    font-family: Arial, sans-serif;
+    padding: 20px;
+    text-align: center;
+  }
+  h1 {
+    font-size: 1.6rem;
+    margin-bottom: 10px;
+    color: #7bc6ff;
+    text-shadow: 0 0 8px #3ea0ff;
+  }
+  .panel {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 18px;
+    border-radius: 10px;
+    margin-top: 20px;
+  }
+  input, button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 12px;
+    border-radius: 8px;
+    background: #0e2a52;
+    color: white;
+    border: 1px solid #1b3f78;
+    font-size: 1rem;
+  }
+  button {
+    cursor: pointer;
+    background: #134a9e;
+    border: 1px solid #2973d1;
+  }
+  button:disabled {
+    opacity: 0.4;
+  }
+  #pausePlayBtn {
+    background: #1976ff;
+    border-color: #4aa3ff;
+  }
+  #resyncBtn {
+    position: fixed;
+    bottom: 22px;
+    right: 22px;
+    width: 60px;
+    height: 60px;
+    background: #2bdcff;
+    border-radius: 50%;
+    border: none;
+    box-shadow: 0 0 12px #2bdcff;
+    font-size: 1.5rem;
+    color: #081a33;
+    cursor: pointer;
+  }
+  #statusBox {
+    margin-top: 16px;
+    text-align: left;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  .statusGood { color: #5dff9d; }
+  .statusWarn { color: #ffdd66; }
+</style>
 </head>
+
 <body>
 
-<h2>Menorah Parade Music</h2>
-<p id="status">Connecting…</p>
+<h1>Berlin Menorah Parade 5786</h1>
 
-<div>
-  <label>Family name (required to arm the system):</label>
-  <input id="nameInput" type="text" placeholder="Family name">
-  <button id="saveNameBtn">Save Family Name</button>
+<div class="panel">
+  <label>Family Name:</label>
+  <input id="nameInput" type="text" placeholder="Your family name">
+  <button id="saveNameBtn">Save Name</button>
+
+  <button id="armBtn" disabled>ARM Audio</button>
+  <button id="pausePlayBtn" style="display:none;">Pause</button>
 </div>
 
-<button id="armBtn" disabled>ARM Audio</button>
+<div id="statusBox" class="panel">
+  <div>Status: <span id="statusText">Connecting…</span></div>
+  <div>Sync: <span id="syncText">–</span></div>
+  <div>Armed: <span id="armedText">No</span></div>
+  <div>Playback: <span id="playbackText">Idle</span></div>
+</div>
+
+<button id="resyncBtn">↻</button>
 
 <script src="client.js"></script>
 </body>

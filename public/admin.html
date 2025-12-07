@@ -1,38 +1,108 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Admin Control – Menorah Parade</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
-    input, button { padding: 10px; font-size: 1rem; width: 100%; margin-top: 10px; }
-    #adminPanel { display: none; }
-    ul { padding-left: 0; list-style: none; }
-  </style>
+<meta charset="UTF-8">
+<title>Berlin Menorah Parade 5786 – Admin Control</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+  body {
+    background: #081a33;
+    color: white;
+    font-family: Arial, sans-serif;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 1.4rem;
+    color: #7bc6ff;
+    text-shadow: 0 0 8px #3ea0ff;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 16px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  input, select {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    background: #0f2e5a;
+    color: white;
+    border: 1px solid #2d4f84;
+    border-radius: 8px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 8px;
+    border: none;
+    font-size: 1.1rem;
+    cursor: pointer;
+  }
+  #startBtn { background: #00e676; color: #081a33; }
+  #pauseBtn { background: #ffeb3b; color: #081a33; }
+  #resumeBtn { background: #03a9f4; color: #081a33; }
+  #stopBtn { background: #ff1744; color: #081a33; }
+
+  #seekSlider {
+    width: 100%;
+    margin-top: 15px;
+  }
+
+  ul { list-style: none; padding-left: 0; }
+  li { margin: 6px 0; }
+</style>
 </head>
+
 <body>
 
-<h2>Admin Control</h2>
+<h1>Berlin Menorah Parade 5786 – Admin Panel</h1>
 
-<div id="pinScreen">
-  <p>Please enter admin PIN:</p>
+<div id="pinScreen" class="card">
+  <h3>Enter Admin PIN</h3>
   <input id="pinInput" type="password">
   <button id="enterPinBtn">Enter</button>
-  <p id="pinError" style="color:red;"></p>
+  <div id="pinError" style="color:red;"></div>
 </div>
 
-<div id="adminPanel">
-  <h3>Controls</h3>
+<div id="adminPanel" style="display:none;">
 
-  <label>Start in (seconds):</label>
-  <input id="delaySeconds" type="number" value="10">
+  <div class="card">
+    <h3>Track Settings</h3>
+    <label>Track:</label>
+    <select id="trackSelect"></select>
 
-  <button id="startBtn">Start Broadcast</button>
-  <button id="stopBtn">Stop Broadcast</button>
+    <label>Start in seconds:</label>
+    <input id="delaySeconds" type="number" value="10">
 
-  <h3>Connected Families</h3>
-  <ul id="clientList"></ul>
+    <button id="startBtn">START</button>
+    <button id="pauseBtn">PAUSE</button>
+    <button id="resumeBtn">RESUME</button>
+    <button id="stopBtn">STOP</button>
+  </div>
+
+  <div class="card">
+    <h3>Seek</h3>
+    <input id="seekSlider" type="range" min="0" max="532000" value="0">
+    <div>Position: <span id="seekLabel">00:00 / 08:52</span></div>
+    <button id="seekGo">SEEK</button>
+  </div>
+
+  <div class="card">
+    <h3>Broadcast Status</h3>
+    <div>Mode: <span id="stateMode">Idle</span></div>
+    <div>Timestamp: <span id="stateTime">00:00</span></div>
+  </div>
+
+  <div class="card">
+    <h3>Connected Families</h3>
+    <ul id="clientList"></ul>
+  </div>
+
 </div>
 
 <script src="admin.js"></script>
