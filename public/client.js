@@ -1,4 +1,5 @@
-// CLIENT (listener) script with iOS fallback, late join support, and clean STOP handling
+// CLIENT (listener) script with iOS fallback, late join support,
+// STOP handling, and required family name before ARM
 
 let ws;
 let audioCtx;
@@ -9,8 +10,16 @@ let armed = false;
 let serverStartTime = null; // last known start time from server
 let currentSource = null; // Web Audio BufferSource
 
+// NEW: name + state for enabling ARM
+let clientName = "";
+let hasName = false;
+let audioLoaded = false;
+let wsReady = false;
+
 const statusEl = document.getElementById("status");
 const armBtn = document.getElementById("armBtn");
+const nameInput = document.getElementById("nameInput");
+const saveNameBtn = document.getElementById("saveNameBtn");
 
 function logStatus(msg) {
   console.log(msg);
@@ -32,7 +41,14 @@ function connectWS() {
 
   ws.onopen = () => {
     console.log("WebSocket opened");
+    wsReady = true;
     ws.send(JSON.stringify({ type: "hello", role: "client" }));
+
+    // If we already know the name (user typed it before WS was ready), send it now.
+    if (hasName && clientName.trim().length > 0) {
+      sendNameRegistration();
+    }
+
     logStatus("Connected. Syncing clock…");
     runClockSync().then(() => {
       logStatus("Clock synced. Loading audio…");
@@ -54,12 +70,24 @@ function connectWS() {
   };
 
   ws.onclose = () => {
+    wsReady = false;
     logStatus("Disconnected from server. Refresh if needed.");
   };
 
   ws.onerror = (err) => {
     console.error("WebSocket error", err);
   };
+}
+
+// Enable/disable the ARM button based on state
+function updateArmButtonState() {
+  // ARM allowed only if:
+  // - audio loaded
+  // - we have a family name
+  // - not already armed
+  const enable = audioLoaded && hasName && !armed;
+  armBtn.disabled = !enable;
+  console.log("updateArmButtonState:", { audioLoaded, hasName, armed, enable });
 }
 
 // CLOCK SYNC
@@ -106,7 +134,6 @@ function handlePong(msg) {
 
     console.log("Time offset (server - client):", timeOffset, "ms");
     logStatus("Clock synced (~" + Math.round(timeOffset) + " ms offset).");
-    clockSyncResolve();
     clockSyncResolve = null;
   } else if (clockSyncResolve) {
     // Request another ping until we hit the sample count
@@ -129,8 +156,9 @@ async function loadAudio() {
       htmlAudio.preload = "auto";
 
       htmlAudio.addEventListener("canplaythrough", () => {
-        logStatus("Audio loaded. Tap ARM when ready.");
-        armBtn.disabled = false;
+        audioLoaded = true;
+        logStatus("Audio loaded. Enter family name & tap ARM.");
+        updateArmButtonState();
       });
 
       htmlAudio.addEventListener("error", (e) => {
@@ -149,8 +177,9 @@ async function loadAudio() {
       }
       const arrayBuffer = await res.arrayBuffer();
       audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      logStatus("Audio loaded. Tap ARM when ready.");
-      armBtn.disabled = false;
+      audioLoaded = true;
+      logStatus("Audio loaded. Enter family name & tap ARM.");
+      updateArmButtonState();
     }
   } catch (err) {
     console.error("Error loading audio:", err);
@@ -158,7 +187,45 @@ async function loadAudio() {
   }
 }
 
+// NEW: handle saving family name
+saveNameBtn.addEventListener("click", () => {
+  const name = (nameInput.value || "").trim();
+  if (!name) {
+    logStatus("Please enter your family name before arming.");
+    return;
+  }
+  clientName = name;
+  hasName = true;
+  logStatus(
+    `Registered family name: ${clientName}. Once audio is loaded, you can tap ARM.`
+  );
+  updateArmButtonState();
+
+  // send registration to server if possible
+  if (wsReady) {
+    sendNameRegistration();
+  }
+});
+
+function sendNameRegistration() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!clientName || !clientName.trim()) return;
+  ws.send(
+    JSON.stringify({
+      type: "register",
+      name: clientName.trim()
+    })
+  );
+}
+
+// ARM BUTTON
+
 armBtn.addEventListener("click", () => {
+  if (!hasName) {
+    logStatus("Please save your family name first.");
+    return;
+  }
+
   // ARM must be a user gesture
   if (isIOS) {
     if (!htmlAudio) {
@@ -172,7 +239,7 @@ armBtn.addEventListener("click", () => {
         htmlAudio.pause();
         htmlAudio.currentTime = 0;
         armed = true;
-        armBtn.disabled = true;
+        updateArmButtonState();
 
         if (serverStartTime) {
           logStatus("Armed (iOS). Joining current track…");
@@ -196,7 +263,7 @@ armBtn.addEventListener("click", () => {
     }
 
     armed = true;
-    armBtn.disabled = true;
+    updateArmButtonState();
 
     if (serverStartTime) {
       logStatus("Armed. Joining current track…");
@@ -207,6 +274,8 @@ armBtn.addEventListener("click", () => {
   }
 });
 
+// START / LATE JOIN / STOP
+
 function handleStart(startTimeFromServer) {
   serverStartTime = startTimeFromServer;
 
@@ -214,34 +283,33 @@ function handleStart(startTimeFromServer) {
   const msUntilStart = serverStartTime - serverNow;
 
   if (armed) {
-    // We are already armed: schedule or join immediately
     scheduleOrJoin();
   } else {
     if (msUntilStart > 0) {
       logStatus(
-        "Start signal received. Track begins soon. Tap ARM to be ready."
+        "Start signal received. Track begins soon. Enter family name & tap ARM to be ready."
       );
     } else {
       logStatus(
-        "Track is already playing. Tap ARM to join in progress."
+        "Track is already playing. Enter family name & tap ARM to join in progress."
       );
     }
   }
 }
 
 function handleLateJoin(startTimeFromServer) {
-  // Track is already in progress according to server
   serverStartTime = startTimeFromServer;
 
   const serverNow = getServerNow();
   const msSinceStart = serverNow - serverStartTime;
 
   if (msSinceStart < 0) {
-    // Shouldn't usually happen, but just in case start is still in the future
     if (armed) {
       scheduleOrJoin();
     } else {
-      logStatus("Track scheduled to start soon. Tap ARM to be ready.");
+      logStatus(
+        "Track scheduled to start soon. Enter family name & tap ARM to be ready."
+      );
     }
     return;
   }
@@ -250,7 +318,9 @@ function handleLateJoin(startTimeFromServer) {
     logStatus("Music already playing. Joining in progress…");
     scheduleOrJoin();
   } else {
-    logStatus("Music already playing. Tap ARM to join in progress.");
+    logStatus(
+      "Music already playing. Enter family name & tap ARM to join in progress."
+    );
   }
 }
 
@@ -345,7 +415,6 @@ function handleStop() {
 }
 
 function stopPlayback() {
-  // Stop audio and reset state so user can ARM again for the next track
   if (isIOS) {
     if (htmlAudio) {
       htmlAudio.pause();
@@ -362,9 +431,11 @@ function stopPlayback() {
 
   serverStartTime = null;
   armed = false;
-  armBtn.disabled = false;
+  updateArmButtonState();
 
-  logStatus("Broadcast ended. Tap ARM to be ready for the next track.");
+  logStatus(
+    "Broadcast ended. Enter family name & tap ARM to be ready for the next track."
+  );
 }
 
 connectWS();
