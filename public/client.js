@@ -356,8 +356,14 @@ function joinInProgress() {
 
 function handleStop() {
   console.log("Received STOP from server");
-  stopPlayback();
+  logStatus("Broadcast ended. Reloading…");
+
+  // Small delay so the user can see the message
+  setTimeout(() => {
+    location.reload();
+  }, 700);
 }
+
 
 function stopPlayback() {
   // Stop audio and reset state so user can ARM again
