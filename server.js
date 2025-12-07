@@ -7,6 +7,30 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// --- Heartbeat to keep WebSocket connections alive on Render ---
+function heartbeat() {
+  this.isAlive = true;
+}
+
+wss.on("connection", (ws) => {
+  ws.isAlive = true;
+  ws.on("pong", heartbeat);
+});
+
+// Check each connection every 30 seconds
+const interval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping(); // send a ping to keep the connection open
+  });
+}, 30000);
+
+wss.on("close", function close() {
+  clearInterval(interval);
+});
+
+
 // Serve static files from /public
 app.use(express.static(path.join(__dirname, "public")));
 
