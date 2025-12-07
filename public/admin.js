@@ -15,9 +15,9 @@ let ws;
 
 function connectWS() {
   ws = new WebSocket(
-    location.protocol === "https:"
-      ? `wss://${location.host}`
-      : `ws://${location.host}`
+    location.protocol === "https:" ?
+      `wss://${location.host}` :
+      `ws://${location.host}`
   );
 
   ws.onopen = () => {
@@ -35,7 +35,7 @@ function connectWS() {
 
 function updateClientList(list) {
   clientList.innerHTML = "";
-  list.forEach((c) => {
+  list.forEach(c => {
     const li = document.createElement("li");
     li.textContent = `${c.id}. ${c.name}`;
     clientList.appendChild(li);

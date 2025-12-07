@@ -2,53 +2,39 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Menorah Sync – Admin</title>
+  <title>Admin Control – Menorah Parade</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      padding: 1.5rem;
-      max-width: 600px;
-      margin: 0 auto;
-    }
-    label {
-      display: block;
-      margin: 1rem 0;
-    }
-    input {
-      padding: 0.25rem 0.5rem;
-      font-size: 1rem;
-      width: 100px;
-    }
-    button {
-      padding: 0.75rem 1.25rem;
-      font-size: 1rem;
-      cursor: pointer;
-    }
-    #status {
-      margin-top: 1rem;
-      min-height: 2rem;
-    }
+    body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
+    input, button { padding: 10px; font-size: 1rem; width: 100%; margin-top: 10px; }
+    #adminPanel { display: none; }
+    ul { padding-left: 0; list-style: none; }
   </style>
 </head>
 <body>
-  <h1>Admin – Menorah Parade</h1>
 
-  <p>
-    Local time: <span id="localTime">–</span>
-  </p>
+<h2>Admin Control</h2>
 
-  <label>
-    Start in (seconds):
-    <input type="number" id="delaySeconds" value="10" min="1" max="60">
-  </label>
+<div id="pinScreen">
+  <p>Please enter admin PIN:</p>
+  <input id="pinInput" type="password">
+  <button id="enterPinBtn">Enter</button>
+  <p id="pinError" style="color:red;"></p>
+</div>
 
-  <button id="startBtn">Start in X seconds</button>
-  <button id="stopBtn" style="margin-left: 0.5rem;">End Current Track</button>
+<div id="adminPanel">
+  <h3>Controls</h3>
 
-  <p id="status"></p>
+  <label>Start in (seconds):</label>
+  <input id="delaySeconds" type="number" value="10">
 
+  <button id="startBtn">Start Broadcast</button>
+  <button id="stopBtn">Stop Broadcast</button>
 
-  <script src="admin.js"></script>
+  <h3>Connected Families</h3>
+  <ul id="clientList"></ul>
+</div>
+
+<script src="admin.js"></script>
 </body>
 </html>
