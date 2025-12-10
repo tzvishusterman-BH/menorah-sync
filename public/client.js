@@ -22,23 +22,28 @@ let trackDuration = 532000;
 let serverStartTime = null;
 let pausedAt = null;
 
-// Last known global state from server
+// Last known server state
 let lastState = null;
 
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-  || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+// iOS detection
+const isIOS =
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.userAgent.includes("Mac") && "ontouchend" in document);
 
-// UI refs
+// UI elements
 const nameInput = document.getElementById("nameInput");
 const armBtn = document.getElementById("armBtn");
 const pausePlayBtn = document.getElementById("pausePlayBtn");
+
 const statusText = document.getElementById("statusText");
 const syncText = document.getElementById("syncText");
 const nowPlayingText = document.getElementById("nowPlayingText");
+
 const resyncBtn = document.getElementById("resyncBtn");
 
-// -------------------- UI HELPERS --------------------
-
+// --------------------------------------
+// UI Helpers
+// --------------------------------------
 function logStatus(msg) {
   statusText.textContent = msg;
 }
@@ -48,23 +53,25 @@ function updateUIButtons() {
 }
 
 function updateNowPlaying() {
-  if (!lastState || lastState.mode === "idle" || !lastState.trackId) {
+  if (!lastState || lastState.mode === "idle") {
     nowPlayingText.textContent = "Nothing";
     return;
   }
-  const t = currentTrackList[lastState.trackId];
-  nowPlayingText.textContent = t ? t.name : "Unknown track";
+
+  const track = currentTrackList[lastState.trackId];
+  nowPlayingText.textContent = track ? track.name : "Unknown Track";
 }
 
-// when user types name → allow ARM
+// Name input unlocks ARM
 nameInput.addEventListener("input", () => {
   clientName = nameInput.value.trim();
   hasName = clientName.length > 0;
   updateUIButtons();
 });
 
-// -------------------- CLOCK SYNC --------------------
-
+// --------------------------------------
+// WebSocket Time Sync
+// --------------------------------------
 let pendingPings = [];
 let offsetSamples = [];
 let syncInProgress = false;
@@ -73,19 +80,23 @@ function runClockSync(samples = 10) {
   syncInProgress = true;
   syncText.textContent = "Syncing…";
   syncText.className = "statusWarn";
+
   offsetSamples = [];
   pendingPings = [];
+
   for (let i = 0; i < samples; i++) sendPing();
 }
 
 function sendPing() {
   const t = Date.now();
   pendingPings.push(t);
+
   ws.send(JSON.stringify({ type: "ping", clientSendTime: t }));
 }
 
 function handlePong(msg) {
   const { clientSendTime, serverTime } = msg;
+
   const idx = pendingPings.indexOf(clientSendTime);
   if (idx === -1) return;
 
@@ -93,15 +104,17 @@ function handlePong(msg) {
 
   const recv = Date.now();
   const rtt = recv - clientSendTime;
+
   const mid = clientSendTime + rtt / 2;
   const offset = serverTime - mid;
+
   offsetSamples.push({ rtt, offset });
 
   if (offsetSamples.length >= 10) {
     const best = offsetSamples
       .sort((a, b) => a.rtt - b.rtt)
       .slice(0, 5)
-      .map((x) => x.offset);
+      .map(x => x.offset);
 
     timeOffset = best.reduce((a, b) => a + b, 0) / best.length;
 
@@ -109,7 +122,7 @@ function handlePong(msg) {
     syncText.className = "statusGood";
     syncInProgress = false;
 
-    // Now that we're synced, if there's a track playing and we're armed, join it
+    // auto-join if track is already playing
     maybeAutoJoin();
     return;
   }
@@ -121,17 +134,24 @@ function getServerNow() {
   return Date.now() + timeOffset;
 }
 
-// -------------------- RESYNC BUTTON --------------------
-
+// --------------------------------------
+// RESYNC BUTTON
+// --------------------------------------
 resyncBtn.onclick = () => {
   runClockSync();
 };
 
-// -------------------- AUDIO LOADING --------------------
-
+// --------------------------------------
+// Audio Loading
+// --------------------------------------
 async function loadAudioFile() {
-  const file = currentTrackList[currentTrackId].file;
-  trackDuration = currentTrackList[currentTrackId].duration;
+  const track = currentTrackList[currentTrackId];
+  if (!track) return;
+
+  const file = track.file;
+  trackDuration = track.duration;
+
+  logStatus("Loading audio...");
 
   try {
     if (isIOS) {
@@ -140,19 +160,20 @@ async function loadAudioFile() {
 
       htmlAudio.addEventListener("canplaythrough", () => {
         audioLoaded = true;
-        logStatus("Audio loaded, enter family name.");
+        logStatus("Audio loaded — enter family name.");
         updateUIButtons();
       });
 
       htmlAudio.load();
     } else {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const res = await fetch(file);
-      const arr = await res.arrayBuffer();
-      audioBuffer = await audioCtx.decodeAudioData(arr);
+
+      const response = await fetch(file);
+      const arrayBuffer = await response.arrayBuffer();
+      audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
       audioLoaded = true;
-      logStatus("Audio loaded, enter family name.");
+      logStatus("Audio loaded — enter family name.");
       updateUIButtons();
     }
   } catch (err) {
@@ -160,19 +181,21 @@ async function loadAudioFile() {
   }
 }
 
-// -------------------- AUTO-JOIN LOGIC --------------------
-
+// --------------------------------------
+// Automatic Join
+// --------------------------------------
 function maybeAutoJoin() {
-  if (!armed || !audioLoaded || !lastState) return;
-  if (lastState.mode !== "playing") return;
+  if (!armed || !lastState) return;
 
-  // track is playing globally → join in
-  serverStartTime = lastState.serverStartTime;
-  resumeFromServer();
+  if (lastState.mode === "playing") {
+    serverStartTime = lastState.serverStartTime;
+    resumeFromServer();
+  }
 }
 
-// -------------------- ARM BUTTON --------------------
-
+// --------------------------------------
+// ARM
+// --------------------------------------
 armBtn.onclick = () => {
   if (!hasName || !audioLoaded) return;
 
@@ -184,22 +207,20 @@ armBtn.onclick = () => {
     ws.send(JSON.stringify({ type: "armed" }));
 
     pausePlayBtn.style.display = "block";
-    logStatus("ARMED. Waiting for / joining track…");
+    logStatus("ARMED — joining broadcast…");
 
-    // if something is already playing, join automatically
     maybeAutoJoin();
   }
 
   if (isIOS) {
-    htmlAudio
-      .play()
+    htmlAudio.play()
       .then(() => {
         htmlAudio.pause();
         htmlAudio.currentTime = 0;
         finishArm();
       })
       .catch(() => {
-        logStatus("Tap ARM again to allow audio.");
+        logStatus("Tap ARM again to enable audio.");
       });
   } else {
     if (audioCtx.state === "suspended") audioCtx.resume();
@@ -207,8 +228,9 @@ armBtn.onclick = () => {
   }
 };
 
-// -------------------- PAUSE / RESUME (LOCAL) --------------------
-
+// --------------------------------------
+// Pause & Resume (Local)
+// --------------------------------------
 pausePlayBtn.onclick = () => {
   if (paused) resumeFromServer();
   else pauseLocal();
@@ -224,14 +246,17 @@ function pauseLocal() {
     htmlAudio.pause();
     pausedAt = htmlAudio.currentTime * 1000;
   } else if (currentSource) {
-    try {
-      currentSource.stop();
-    } catch {}
+    try { currentSource.stop(); } catch {}
     pausedAt = getServerNow() - serverStartTime;
   }
 
   pausePlayBtn.textContent = "Play";
-  ws.send(JSON.stringify({ type: "clientState", playing: false, paused: true }));
+
+  ws.send(JSON.stringify({
+    type: "clientState",
+    playing: false,
+    paused: true
+  }));
 }
 
 function resumeFromServer() {
@@ -251,49 +276,61 @@ function resumeFromServer() {
     htmlAudio.play();
   } else {
     if (audioCtx.state === "suspended") audioCtx.resume();
+
     if (currentSource) {
-      try {
-        currentSource.stop();
-      } catch {}
+      try { currentSource.stop(); } catch {}
     }
+
     const src = audioCtx.createBufferSource();
     src.buffer = audioBuffer;
     src.connect(audioCtx.destination);
     src.start(0, offset / 1000);
+
     currentSource = src;
   }
 
   pausePlayBtn.textContent = "Pause";
-  ws.send(JSON.stringify({ type: "clientState", playing: true, paused: false }));
+
+  ws.send(JSON.stringify({
+    type: "clientState",
+    playing: true,
+    paused: false
+  }));
 }
 
-// -------------------- SERVER COMMAND HANDLERS --------------------
-
+// --------------------------------------
+// Server Commands
+// --------------------------------------
 function handleStart(msg) {
-  if (!armed) {
-    logStatus("Start received — ARM required to join.");
-    return;
-  }
+  if (!armed) return;
+
   serverStartTime = msg.serverStartTime;
   paused = false;
   playing = false;
-  logStatus("Start scheduled…");
+
+  logStatus("Broadcast starting...");
 }
 
 function handlePause(msg) {
   if (!armed) return;
+
   pausedAt = msg.pausedAt;
   pauseLocal();
 }
 
 function handleResume(msg) {
   if (!armed) return;
+
   serverStartTime = msg.serverStartTime;
   resumeFromServer();
 }
 
 function handleSeek(msg) {
-  if (!armed) return;
+  if (msg.trackId) {
+    currentTrackId = msg.trackId;
+    loadAudioFile();
+  }
+
   serverStartTime = msg.serverStartTime;
   resumeFromServer();
 }
@@ -301,26 +338,24 @@ function handleSeek(msg) {
 function handleStop() {
   if (!armed) return;
 
-  serverStartTime = null;
-  pausedAt = null;
   paused = false;
   playing = false;
+  serverStartTime = null;
 
   if (isIOS) {
     htmlAudio.pause();
     htmlAudio.currentTime = 0;
   } else if (currentSource) {
-    try {
-      currentSource.stop();
-    } catch {}
+    try { currentSource.stop(); } catch {}
   }
 
   pausePlayBtn.textContent = "Pause";
   nowPlayingText.textContent = "Nothing";
 }
 
-// -------------------- WEBSOCKET SETUP --------------------
-
+// --------------------------------------
+// WebSocket Setup
+// --------------------------------------
 function connectWS() {
   ws = new WebSocket(
     location.protocol === "https:"
@@ -331,6 +366,7 @@ function connectWS() {
   ws.onopen = () => {
     wsReady = true;
     ws.send(JSON.stringify({ type: "hello", role: "client" }));
+
     logStatus("Syncing clock…");
     runClockSync();
   };
@@ -342,12 +378,13 @@ function connectWS() {
 
     if (msg.type === "tracks") {
       currentTrackList = {};
-      msg.tracks.forEach((t) => (currentTrackList[t.id] = t));
-      // default track
+      msg.tracks.forEach(t => currentTrackList[t.id] = t);
+
       currentTrackId = "tyh";
       if (currentTrackList["tyh"]) {
         trackDuration = currentTrackList["tyh"].duration;
       }
+
       loadAudioFile();
       updateNowPlaying();
       return;
@@ -356,7 +393,6 @@ function connectWS() {
     if (msg.type === "state") {
       lastState = msg.state;
       updateNowPlaying();
-      // if already armed & synced & playing, this will auto join
       maybeAutoJoin();
       return;
     }

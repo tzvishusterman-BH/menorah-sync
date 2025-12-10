@@ -20,13 +20,15 @@ const clientList = document.getElementById("clientList");
 let ws;
 let trackMap = {};
 let currentDuration = 532000;
+let playbackInterval = null;
+let lastState = null;
 
 // ------------ LIVE CLOCK ------------
 setInterval(() => {
   const d = new Date();
-  const hh = d.getHours().toString().padStart(2,"0");
-  const mm = d.getMinutes().toString().padStart(2,"0");
-  const ss = d.getSeconds().toString().padStart(2,"0");
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  const ss = d.getSeconds().toString().padStart(2, "0");
   localClock.textContent = `${hh}:${mm}:${ss}`;
 }, 1000);
 
@@ -54,8 +56,10 @@ function connectWS() {
     const msg = JSON.parse(e.data);
 
     if (msg.type === "tracks") {
+      // Populate track dropdown
       trackMap = {};
       trackSelect.innerHTML = "";
+
       msg.tracks.forEach((t) => {
         trackMap[t.id] = t;
         const opt = document.createElement("option");
@@ -63,6 +67,7 @@ function connectWS() {
         opt.textContent = t.name;
         trackSelect.appendChild(opt);
       });
+
       updateTrackDuration();
     }
 
@@ -93,41 +98,68 @@ function updateTrackDuration() {
   const t = trackMap[trackSelect.value];
   if (!t) return;
   currentDuration = t.duration;
-  seekSlider.max = t.duration;
-  seekLabel.textContent = `00:00 / ${formatMs(t.duration)}`;
+  seekSlider.max = currentDuration;
+  seekLabel.textContent = `00:00 / ${formatMs(currentDuration)}`;
 }
 
-trackSelect.onchange = updateTrackDuration;
+// When admin changes track manually
+trackSelect.onchange = () => {
+  updateTrackDuration();
+};
 
 // ------------ STATE UPDATES ------------
+function clearPlaybackInterval() {
+  if (playbackInterval) {
+    clearInterval(playbackInterval);
+    playbackInterval = null;
+  }
+}
+
 function updateState(st) {
+  lastState = st;
   stateMode.textContent = st.mode;
 
+  // Make dropdown reflect the current track
+  if (st.trackId && trackMap[st.trackId]) {
+    trackSelect.value = st.trackId;
+    updateTrackDuration();
+  }
+
+  clearPlaybackInterval();
+
   if (st.mode === "playing") {
-    const updater = setInterval(() => {
-      if (stateMode.textContent !== "playing") {
-        clearInterval(updater);
+    playbackInterval = setInterval(() => {
+      if (!lastState || lastState.mode !== "playing") {
+        clearPlaybackInterval();
         return;
       }
       const now = Date.now();
-      const offset = now - st.serverStartTime;
+      const offset = now - lastState.serverStartTime;
+
       stateTime.textContent = formatMs(offset);
       seekSlider.value = offset;
       seekLabel.textContent = `${formatMs(offset)} / ${formatMs(currentDuration)}`;
     }, 200);
   } else if (st.mode === "paused") {
-    stateTime.textContent = formatMs(st.pausedAt);
+    stateTime.textContent = formatMs(st.pausedAt || 0);
+    seekSlider.value = st.pausedAt || 0;
+    seekLabel.textContent = `${formatMs(st.pausedAt || 0)} / ${formatMs(currentDuration)}`;
   } else {
+    // idle or unknown
     stateTime.textContent = "00:00";
+    seekSlider.value = 0;
+    seekLabel.textContent = `00:00 / ${formatMs(currentDuration)}`;
   }
 }
 
 // ------------ BUTTONS ------------
 seekGo.onclick = () => {
-  const offset = Number(seekSlider.value);
+  const offset = Number(seekSlider.value) || 0;
+
   ws.send(JSON.stringify({
     type: "seek",
-    offsetMs: offset
+    offsetMs: offset,
+    trackId: trackSelect.value
   }));
 };
 
