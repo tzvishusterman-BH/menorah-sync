@@ -1,176 +1,364 @@
-const PIN = "130865";
-
-const pinScreen = document.getElementById("pinScreen");
-const pinInput = document.getElementById("pinInput");
-const enterPinBtn = document.getElementById("enterPinBtn");
-const pinError = document.getElementById("pinError");
-
-const adminPanel = document.getElementById("adminPanel");
-
-const trackSelect = document.getElementById("trackSelect");
-const seekSlider = document.getElementById("seekSlider");
-const timeDisplay = document.getElementById("timeDisplay");
-const seekGo = document.getElementById("seekGo");
-const stopBtn = document.getElementById("stopBtn");
-
-const stateMode = document.getElementById("stateMode");
-const stateTime = document.getElementById("stateTime");
-const localClock = document.getElementById("localClock");
-const clientList = document.getElementById("clientList");
+//-------------------------------------------------------------
+//  ADMIN CONTROL CENTER — Berlin Menorah Parade 5786
+//  Playlist Editor + Queue Engine + Skip/Back (Rule A)
+//  Terminate (Kick) Clients • Soft Chime Notifications
+//  Language System • PIN Screen • Live Clock
+//-------------------------------------------------------------
 
 let ws;
-let trackMap = {};
-let currentDuration = 0;
-let playInterval = null;
-let lastState = null;
+let tracks = {};                 // trackId → {id, name, file, duration}
+let playlist = [];               // ordered array of track IDs
+let broadcastState = {};         // state from server
+let clients = [];                // connected clients
 
-// ------------- LIVE CLOCK -------------
-setInterval(() => {
-  const d = new Date();
-  localClock.textContent =
-    d.toTimeString().split(" ")[0]; // HH:MM:SS
-}, 1000);
+// UI Elements
+const pinScreen = document.getElementById("pinScreen");
+const adminPanel = document.getElementById("adminPanel");
+const pinInput = document.getElementById("pinInput");
+const pinError = document.getElementById("pinError");
+const enterPinBtn = document.getElementById("enterPinBtn");
 
-// Format mm:ss
-function fmt(ms) {
-  if (ms < 0) ms = 0;
-  const s = Math.floor(ms / 1000);
-  return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
-}
+const playlistContainer = document.getElementById("playlistContainer");
+const addTrackSelect = document.getElementById("addTrackSelect");
+const addTrackBtn = document.getElementById("addTrackBtn");
+const nextOverrideSelect = document.getElementById("nextOverrideSelect");
 
-// ------------- WEBSOCKET -------------
-function connectWS() {
-  ws = new WebSocket(
-    location.protocol === "https:" ?
-    `wss://${location.host}` :
-    `ws://${location.host}`
-  );
+const seekSlider = document.getElementById("seekSlider");
+const timeLabel = document.getElementById("timeLabel");
+const nowPlayingEl = document.getElementById("nowPlaying");
+
+const clientListEl = document.getElementById("clientList");
+const clientCountEl = document.getElementById("clientCount");
+
+const backBtn = document.getElementById("backBtn");
+const skipBtn = document.getElementById("skipBtn");
+const stopBtn = document.getElementById("stopBtn");
+
+const langSelect = document.getElementById("langSelect");
+
+//==============================================================
+//   1.  PIN SCREEN
+//==============================================================
+
+enterPinBtn.addEventListener("click", () => {
+  const entered = pinInput.value.trim();
+  const correct = "130865";     // Your PIN
+
+  if (entered !== correct) {
+    pinError.innerText = "Incorrect PIN";
+    return;
+  }
+
+  pinScreen.style.display = "none";
+  adminPanel.style.display = "block";
+
+  initWebSocket();
+});
+
+//==============================================================
+//   2.  WEBSOCKET SETUP
+//==============================================================
+
+function initWebSocket() {
+  ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({ type:"hello", role:"admin" }));
+    ws.send(JSON.stringify({ type: "hello", role: "admin" }));
   };
 
-  ws.onmessage = e => {
-    const msg = JSON.parse(e.data);
+  ws.onmessage = msg => {
+    let data;
+    try { data = JSON.parse(msg.data); } catch { return; }
 
-    if (msg.type === "tracks") {
-      trackSelect.innerHTML = "";
-      trackMap = {};
+    switch (data.type) {
 
-      msg.tracks.forEach(t => {
-        trackMap[t.id] = t;
-        const op = document.createElement("option");
-        op.value = t.id;
-        op.textContent = t.name;
-        trackSelect.appendChild(op);
-      });
+      case "tracks":
+        tracks = {};
+        data.tracks.forEach(t => tracks[t.id] = t);
+        populateTrackSelectors();
+        break;
 
-      updateDuration();
-    }
+      case "playlist":
+        playlist = data.playlist;
+        renderPlaylist();
+        break;
 
-    if (msg.type === "state") {
-      updateState(msg.state);
-    }
+      case "state":
+        broadcastState = data.state;
+        updateStateUI();
+        break;
 
-    if (msg.type === "clients") {
-      updateClients(msg.clients);
+      case "clients":
+        clients = data.clients;
+        renderClientList();
+        break;
+
+      case "trackEnded":
+        playChime();
+        showToast("Track ended — starting next...");
+        break;
     }
   };
 }
 
-// ------------- CLIENT LIST -------------
-function updateClients(list) {
-  clientList.innerHTML = "";
-  list.forEach(c => {
-    const li = document.createElement("li");
-    li.innerHTML =
-      `<strong>${c.name || "Unnamed"}</strong> 
-      – Armed: ${c.armed ? "🟢" : "⚪"} 
-      – Playing: ${c.playing ? "▶" : "⏸"}`;
-    clientList.appendChild(li);
+//==============================================================
+//   3.  PLAYLIST UI RENDERING
+//==============================================================
+
+// Build dropdowns for Add Track & Next Override
+function populateTrackSelectors() {
+  addTrackSelect.innerHTML = "";
+  nextOverrideSelect.innerHTML = "<option value=''>---</option>";
+
+  for (const id in tracks) {
+    const t = tracks[id];
+
+    let opt1 = document.createElement("option");
+    opt1.value = t.id;
+    opt1.textContent = t.name;
+    addTrackSelect.appendChild(opt1);
+
+    let opt2 = document.createElement("option");
+    opt2.value = t.id;
+    opt2.textContent = t.name;
+    nextOverrideSelect.appendChild(opt2);
+  }
+}
+
+addTrackBtn.addEventListener("click", () => {
+  const id = addTrackSelect.value;
+  if (!id) return;
+
+  playlist.push(id);
+  sendPlaylist();
+});
+
+// Build playlist list view
+function renderPlaylist() {
+  playlistContainer.innerHTML = "";
+
+  playlist.forEach((id, index) => {
+    const t = tracks[id];
+    if (!t) return;
+
+    const card = document.createElement("div");
+    card.className = "trackCard";
+    card.draggable = true;
+    card.dataset.index = index;
+
+    // Highlight if playing
+    if (broadcastState.trackId === id) {
+      card.style.border = "2px solid #1db954";
+    }
+
+    const name = document.createElement("div");
+    name.className = "trackName";
+    name.textContent = t.name;
+
+    const del = document.createElement("button");
+    del.className = "deleteTrack";
+    del.textContent = "X";
+    del.onclick = () => {
+      playlist.splice(index, 1);
+      sendPlaylist();
+    };
+
+    card.appendChild(name);
+    card.appendChild(del);
+
+    // Drag events
+    card.addEventListener("dragstart", onDragStart);
+    card.addEventListener("dragover", onDragOver);
+    card.addEventListener("drop", onDrop);
+
+    playlistContainer.appendChild(card);
   });
 }
 
-// ------------- TRACK DURATIONS -------------
-function updateDuration() {
-  const t = trackMap[trackSelect.value];
-  if (!t) return;
-  currentDuration = t.duration;
-  seekSlider.max = currentDuration;
-  timeDisplay.textContent = `00:00 / ${fmt(currentDuration)}`;
+let dragIndex = null;
+
+function onDragStart(e) {
+  dragIndex = Number(e.target.dataset.index);
 }
 
-trackSelect.onchange = () => { updateDuration(); };
-
-// ------------- STATE HANDLING -------------
-function clearPlayInterval() {
-  if (playInterval) {
-    clearInterval(playInterval);
-    playInterval = null;
-  }
+function onDragOver(e) {
+  e.preventDefault();
 }
 
-function updateState(st) {
-  lastState = st;
+function onDrop(e) {
+  const dropIndex = Number(e.target.closest(".trackCard").dataset.index);
+  const item = playlist.splice(dragIndex, 1)[0];
+  playlist.splice(dropIndex, 0, item);
+  sendPlaylist();
+}
 
-  stateMode.textContent = st.mode;
+// Send updated playlist to server
+function sendPlaylist() {
+  ws.send(JSON.stringify({ type: "playlistSet", playlist }));
+}
 
-  if (st.trackId && trackMap[st.trackId]) {
-    trackSelect.value = st.trackId;
-    updateDuration();
+//==============================================================
+//   4.  NEXT OVERRIDE
+//==============================================================
+
+nextOverrideSelect.addEventListener("change", () => {
+  const val = nextOverrideSelect.value;
+  if (val) {
+    ws.send(JSON.stringify({ type: "setNextOverride", trackId: val }));
+    showToast("Next track override set.");
   }
+});
 
-  clearPlayInterval();
+//==============================================================
+//   5.  CLIENT LIST + TERMINATE
+//==============================================================
 
-  if (st.mode === "playing") {
-    playInterval = setInterval(() => {
-      const now = Date.now();
-      const offset = now - st.serverStartTime;
+function renderClientList() {
+  clientListEl.innerHTML = "";
+  clientCountEl.textContent = `${clients.length} Cars Connected`;
 
-      stateTime.textContent = fmt(offset);
-      seekSlider.value = offset;
-      timeDisplay.textContent = `${fmt(offset)} / ${fmt(currentDuration)}`;
+  clients.forEach(c => {
+    const row = document.createElement("div");
 
-    }, 200);
+    const name = document.createElement("div");
+    name.textContent = c.name || "(Unnamed)";
 
-  } else if (st.mode === "paused") {
-    stateTime.textContent = fmt(st.pausedAt);
-    seekSlider.value = st.pausedAt;
-    timeDisplay.textContent = `${fmt(st.pausedAt)} / ${fmt(currentDuration)}`;
+    const kill = document.createElement("button");
+    kill.className = "terminateBtn";
+    kill.textContent = "Terminate";
+    kill.onclick = () => {
+      ws.send(JSON.stringify({
+        type: "terminateClient",
+        clientId: c.id
+      }));
+    };
 
-  } else {
-    stateTime.textContent = "00:00";
+    row.appendChild(name);
+    row.appendChild(kill);
+    clientListEl.appendChild(row);
+  });
+}
+
+//==============================================================
+//   6.  CONTROL BUTTONS — SKIP/BACK/STOP
+//==============================================================
+
+backBtn.addEventListener("click", () => {
+  ws.send(JSON.stringify({ type: "back" }));
+});
+
+skipBtn.addEventListener("click", () => {
+  ws.send(JSON.stringify({ type: "skip" }));
+});
+
+stopBtn.addEventListener("click", () => {
+  ws.send(JSON.stringify({ type: "stop" }));
+});
+
+//==============================================================
+//   7.  NOW PLAYING + SEEK BAR
+//==============================================================
+
+function updateStateUI() {
+  if (!broadcastState || !broadcastState.trackId) {
+    nowPlayingEl.textContent = "Now Playing: —";
     seekSlider.value = 0;
-    timeDisplay.textContent = `00:00 / ${fmt(currentDuration)}`;
+    timeLabel.textContent = "00:00 / 00:00";
+    return;
   }
+
+  const t = tracks[broadcastState.trackId];
+  nowPlayingEl.textContent = "Now Playing: " + t.name;
+
+  // Update playlist highlight
+  renderPlaylist();
+
+  if (!broadcastState.serverStartTime) return;
+
+  const now = Date.now();
+  const elapsed = now - broadcastState.serverStartTime;
+
+  let dur = t.duration;
+  let pct = Math.min(100, Math.floor((elapsed / dur) * 100));
+  seekSlider.value = pct;
+
+  function fmt(ms) {
+    let s = Math.floor(ms / 1000);
+    let m = Math.floor(s / 60);
+    s = s % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  timeLabel.textContent =
+    `${fmt(elapsed)} / ${fmt(dur)}`;
 }
 
-// ------------- CONTROLS -------------
-seekGo.onclick = () => {
-  const offset = Number(seekSlider.value) || 0;
+setInterval(updateStateUI, 250);
 
-  ws.send(JSON.stringify({
-    type: "seek",
-    offsetMs: offset,
-    trackId: trackSelect.value
-  }));
-};
+//==============================================================
+//   8.  NOTIFICATIONS (Soft Chime + Toast)
+//==============================================================
 
-seekSlider.oninput = () => {
-  timeDisplay.textContent = `${fmt(seekSlider.value)} / ${fmt(currentDuration)}`;
-};
+function playChime() {
+  const audio = new Audio("chime.mp3");
+  audio.volume = 0.4;
+  audio.play().catch(() => {});
+}
 
-stopBtn.onclick = () => {
-  ws.send(JSON.stringify({ type:"stop" }));
-};
+function showToast(msg) {
+  const toast = document.createElement("div");
+  toast.textContent = msg;
+  toast.style.position = "fixed";
+  toast.style.bottom = "20px";
+  toast.style.left = "50%";
+  toast.style.transform = "translateX(-50%)";
+  toast.style.background = "#1db954";
+  toast.style.color = "black";
+  toast.style.padding = "12px 20px";
+  toast.style.borderRadius = "10px";
+  toast.style.fontWeight = "bold";
+  toast.style.zIndex = 9999;
+  toast.style.opacity = 1;
+  toast.style.transition = "opacity 1s ease-out";
 
-// ------------- PIN SYSTEM -------------
-enterPinBtn.onclick = () => {
-  if (pinInput.value.trim() === PIN) {
-    pinScreen.style.display = "none";
-    adminPanel.style.display = "block";
-    connectWS();
-  } else {
-    pinError.textContent = "Incorrect PIN";
-  }
-};
+  document.body.appendChild(toast);
+
+  setTimeout(() => toast.style.opacity = 0, 1500);
+  setTimeout(() => toast.remove(), 2600);
+}
+
+//==============================================================
+//   9.  LANGUAGE SYSTEM
+//==============================================================
+
+langSelect.addEventListener("change", () => {
+  const lang = langSelect.value;
+  localStorage.setItem("adminLang", lang);
+  applyTranslations(lang);
+});
+
+function applyTranslations(lang) {
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.dataset.i18n;
+    el.textContent = translations[lang][key] || key;
+  });
+}
+
+// Load saved language:
+const savedLang = localStorage.getItem("adminLang") || "en";
+langSelect.value = savedLang;
+applyTranslations(savedLang);
+
+//==============================================================
+//   10. LIVE CLOCK
+//==============================================================
+
+const clockEl = document.getElementById("clock");
+
+setInterval(() => {
+  const d = new Date();
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  clockEl.textContent = `${h}:${m}:${s}`;
+}, 500);

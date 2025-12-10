@@ -1,299 +1,261 @@
+//-------------------------------------------------------------
+//  CLIENT PAGE — Berlin Menorah Parade 5786
+//  Handles:
+//   ✔ Audio sync
+//   ✔ ARM gating with family name
+//   ✔ Pause/play
+//   ✔ Status indicator
+//   ✔ Multi-language UI
+//   ✔ Terminate (kick) handling
+//-------------------------------------------------------------
+
 let ws;
 let audioCtx;
 let audioBuffer = null;
-let htmlAudio = null;
-let currentSource = null;
+let sourceNode = null;
+let isPlaying = false;
 
-let clientName = "";
-let hasName = false;
-let armed = false;
-let playing = false;
-let paused = false;
-
-let audioLoaded = false;
-let wsReady = false;
-
-let timeOffset = 0;
-
-let currentTrackList = {};
-let currentTrackId = "tyh";
-let trackDuration = 532000;
-
+let tracks = {};     // id → {id, name, file, duration}
+let currentTrackId = null;
 let serverStartTime = null;
-let lastState = null;
 
-const isIOS =
-  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-  (navigator.userAgent.includes("Mac") && "ontouchend" in document);
-
-// UI refs
-const nameInput = document.getElementById("nameInput");
+const familyNameInput = document.getElementById("familyName");
 const armBtn = document.getElementById("armBtn");
-const pausePlayBtn = document.getElementById("pausePlayBtn");
+const pauseBtn = document.getElementById("pauseBtn");
 const statusText = document.getElementById("statusText");
-const syncText = document.getElementById("syncText");
-const nowPlayingText = document.getElementById("nowPlayingText");
-const resyncBtn = document.getElementById("resyncBtn");
+const trackTitle = document.getElementById("trackTitle");
+const langSelect = document.getElementById("langSelect");
 
-// UI Helpers
-function logStatus(msg) { statusText.textContent = msg; }
-function updateUIButtons() { armBtn.disabled = !(audioLoaded && hasName && !armed); }
+//==============================================================
+// LANGUAGE
+//==============================================================
 
-function updateNowPlaying() {
-  if (!lastState || lastState.mode === "idle") {
-    nowPlayingText.textContent = "Nothing";
-    return;
-  }
-  const t = currentTrackList[lastState.trackId];
-  nowPlayingText.textContent = t ? t.name : "Unknown";
+langSelect.addEventListener("change", () => {
+  const lang = langSelect.value;
+  localStorage.setItem("clientLang", lang);
+  applyTranslations(lang);
+});
+
+// Load saved preference
+const savedLang = localStorage.getItem("clientLang") || "en";
+langSelect.value = savedLang;
+applyTranslations(savedLang);
+
+
+//==============================================================
+// START WEBSOCKET
+//==============================================================
+
+function initWS() {
+  ws = new WebSocket(location.origin.replace(/^http/, "ws"));
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: "hello", role: "client" }));
+  };
+
+  ws.onmessage = async msg => {
+    let data;
+    try { data = JSON.parse(msg.data); } catch { return; }
+
+    switch (data.type) {
+
+      case "tracks":
+        tracks = {};
+        data.tracks.forEach(t => tracks[t.id] = t);
+        break;
+
+      case "state":
+        handleState(data.state);
+        break;
+
+      case "seek":
+        handleSeek(data.trackId, data.serverStartTime);
+        break;
+
+      case "stop":
+        stopAudio();
+        updateStatus("Not Synced");
+        break;
+
+      case "terminated":
+        stopAudio();
+        alert("Your audio has been disabled by parade staff.");
+        armBtn.disabled = true;
+        break;
+    }
+  };
 }
 
-nameInput.addEventListener("input", () => {
-  clientName = nameInput.value.trim();
-  hasName = clientName.length > 0;
-  updateUIButtons();
+initWS();
+
+
+//==============================================================
+// ARM AUDIO
+//==============================================================
+
+armBtn.addEventListener("click", async () => {
+  const name = familyNameInput.value.trim();
+  if (!name) {
+    alert("Please enter your family name first.");
+    return;
+  }
+
+  // Send registration
+  ws.send(JSON.stringify({ type: "register", name }));
+
+  // ARM requires activating audio context
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    await audioCtx.resume();
+  } catch {}
+
+  ws.send(JSON.stringify({ type: "armed" }));
+
+  armBtn.style.display = "none";
+  pauseBtn.style.display = "inline-block";
+
+  updateStatus("Armed — Waiting for playback…");
 });
 
 
-// CLOCK SYNC
-let pendingPings = [];
-let offsets = [];
+//==============================================================
+// STATE HANDLING
+//==============================================================
 
-function runClockSync(samples = 10) {
-  offsets = [];
-  syncText.textContent = "Syncing…";
-  syncText.className = "statusWarn";
+async function handleState(state) {
+  if (!state || !state.trackId) {
+    updateStatus("Idle");
+    trackTitle.textContent = "Now Playing: —";
+    stopAudio();
+    return;
+  }
 
-  for (let i = 0; i < samples; i++) sendPing();
-}
+  // Track changed?
+  if (state.trackId !== currentTrackId) {
+    await loadTrack(state.trackId);
+  }
 
-function sendPing() {
-  const t = Date.now();
-  pendingPings.push(t);
-  ws.send(JSON.stringify({ type: "ping", clientSendTime: t }));
-}
+  currentTrackId = state.trackId;
+  serverStartTime = state.serverStartTime;
 
-function handlePong(msg) {
-  let idx = pendingPings.indexOf(msg.clientSendTime);
-  if (idx === -1) return;
+  const t = tracks[state.trackId];
+  trackTitle.textContent = "Now Playing: " + t.name;
 
-  pendingPings.splice(idx, 1);
-
-  const now = Date.now();
-  const rtt = now - msg.clientSendTime;
-  const server = msg.serverTime;
-
-  const mid = msg.clientSendTime + rtt / 2;
-  const offset = server - mid;
-
-  offsets.push({ rtt, offset });
-
-  if (offsets.length >= 10) {
-    const best = offsets.sort((a,b)=>a.rtt-b.rtt).slice(0,5).map(x=>x.offset);
-    timeOffset = best.reduce((a,b)=>a+b,0) / best.length;
-
-    syncText.textContent = "Synced";
-    syncText.className = "statusGood";
-
-    maybeAutoJoin();
-  } else {
-    sendPing();
+  if (state.mode === "playing") {
+    syncPlayback();
   }
 }
 
-function getServerNow() { return Date.now() + timeOffset; }
+
+//==============================================================
+// SEEK HANDLING
+//==============================================================
+
+async function handleSeek(trackId, startTime) {
+  if (trackId !== currentTrackId) {
+    await loadTrack(trackId);
+  }
+  serverStartTime = startTime;
+  syncPlayback();
+}
 
 
-// RESYNC
-resyncBtn.onclick = () => { runClockSync(); };
+//==============================================================
+// LOAD AUDIO FILE
+//==============================================================
 
+async function loadTrack(trackId) {
+  stopAudio();
 
-// AUDIO LOADING
-async function loadAudioFile() {
-  const file = currentTrackList[currentTrackId].file;
-  trackDuration = currentTrackList[currentTrackId].duration;
+  const t = tracks[trackId];
+  if (!t) return;
+
+  const url = t.file;
 
   try {
-    if (isIOS) {
-      htmlAudio = new Audio(file);
-      htmlAudio.preload = "auto";
+    const resp = await fetch(url);
+    const arr = await resp.arrayBuffer();
 
-      htmlAudio.addEventListener("canplaythrough", () => {
-        audioLoaded = true;
-        updateUIButtons();
-      });
-
-      htmlAudio.load();
-
-    } else {
+    if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const res = await fetch(file);
-      const buf = await res.arrayBuffer();
-      audioBuffer = await audioCtx.decodeAudioData(buf);
-
-      audioLoaded = true;
-      updateUIButtons();
+      await audioCtx.resume();
     }
 
+    audioBuffer = await audioCtx.decodeAudioData(arr);
   } catch (err) {
-    logStatus("Audio load error");
+    console.error("Audio load error:", err);
   }
 }
 
 
-// AUTO-JOIN
-function maybeAutoJoin() {
-  if (!armed || !lastState) return;
-  if (lastState.mode !== "playing") return;
+//==============================================================
+// SYNC PLAYBACK
+//==============================================================
 
-  serverStartTime = lastState.serverStartTime;
-  resumeFrom();
+async function syncPlayback() {
+  if (!audioBuffer || !audioCtx) return;
+
+  stopAudio();
+
+  const now = audioCtx.currentTime * 1000;
+  const offsetMs = Date.now() - serverStartTime;
+  const offsetSec = offsetMs / 1000;
+
+  if (offsetSec < 0) return;
+
+  sourceNode = audioCtx.createBufferSource();
+  sourceNode.buffer = audioBuffer;
+  sourceNode.connect(audioCtx.destination);
+
+  try {
+    sourceNode.start(0, offsetSec);
+    isPlaying = true;
+    pauseBtn.textContent = translations[savedLang]["pauseBtn"];
+    updateStatus("Synced");
+  } catch (err) {
+    console.error("Play error:", err);
+  }
 }
 
 
-// ARM
-armBtn.onclick = () => {
+//==============================================================
+// PAUSE / PLAY
+//==============================================================
 
-  function finish() {
-    armed = true;
-    updateUIButtons();
-
-    ws.send(JSON.stringify({ type: "register", name: clientName }));
-    ws.send(JSON.stringify({ type: "armed" }));
-
-    pausePlayBtn.style.display = "block";
-    maybeAutoJoin();
+pauseBtn.addEventListener("click", async () => {
+  if (!isPlaying) {
+    syncPlayback();
+    return;
   }
 
-  if (isIOS) {
-    htmlAudio.play()
-      .then(()=>{ htmlAudio.pause(); htmlAudio.currentTime=0; finish(); })
-      .catch(()=> logStatus("Tap ARM again"));
-  } else {
-    if (audioCtx.state === "suspended") audioCtx.resume();
-    finish();
-  }
-};
+  stopAudio();
+  isPlaying = false;
+  pauseBtn.textContent = translations[savedLang]["playBtn"];
+});
 
 
-// LOCAL PLAYBACK
-pausePlayBtn.onclick = () => {
-  paused ? resumeFrom() : pauseLocal();
-};
+//==============================================================
+// STOP AUDIO
+//==============================================================
 
-function pauseLocal() {
-  paused = true;
-  playing = false;
-
-  if (isIOS) {
-    htmlAudio.pause();
-  } else if (currentSource) {
-    try { currentSource.stop(); } catch {}
-  }
-
-  pausePlayBtn.textContent = "Play";
-
-  ws.send(JSON.stringify({
-    type: "clientState",
-    playing: false,
-    paused: true
-  }));
-}
-
-function resumeFrom() {
-  if (!armed || !serverStartTime) return;
-
-  const now = getServerNow();
-  let offset = now - serverStartTime;
-  if (offset < 0) offset = 0;
-  if (offset > trackDuration) offset = trackDuration - 50;
-
-  paused = false;
-  playing = true;
-
-  if (isIOS) {
-    htmlAudio.currentTime = offset/1000;
-    htmlAudio.play();
-  } else {
-    if (audioCtx.state === "suspended") audioCtx.resume();
-    if (currentSource) try{currentSource.stop();}catch{}
-
-    const src = audioCtx.createBufferSource();
-    src.buffer = audioBuffer;
-    src.connect(audioCtx.destination);
-    src.start(0, offset/1000);
-    currentSource = src;
-  }
-
-  pausePlayBtn.textContent = "Pause";
-
-  ws.send(JSON.stringify({
-    type: "clientState",
-    playing: true,
-    paused: false
-  }));
+function stopAudio() {
+  try {
+    if (sourceNode) sourceNode.stop();
+  } catch {}
+  sourceNode = null;
+  isPlaying = false;
 }
 
 
-// SERVER COMMANDS
-function handleSeek(msg) {
-  if (msg.trackId) {
-    currentTrackId = msg.trackId;
-    loadAudioFile();
-  }
-  serverStartTime = msg.serverStartTime;
-  resumeFrom();
-}
+//==============================================================
+// UI HELPERS
+//==============================================================
 
-function handleStop() {
-  playing = false;
-  paused = false;
-
-  if (isIOS) {
-    htmlAudio.pause();
-    htmlAudio.currentTime = 0;
-  } else if (currentSource) {
-    try { currentSource.stop(); } catch {}
-  }
-
-  nowPlayingText.textContent = "Nothing";
-  pausePlayBtn.textContent = "Pause";
-}
-
-function handleState(st) {
-  lastState = st;
-  updateNowPlaying();
-  maybeAutoJoin();
+function updateStatus(msg) {
+  statusText.textContent = translations[savedLang]["status"] + ": " + msg;
 }
 
 
-// WEBSOCKET
-function connectWS() {
-  ws = new WebSocket(
-    location.protocol === "https:" ?
-    `wss://${location.host}` :
-    `ws://${location.host}`
-  );
-
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type:"hello", role:"client" }));
-    runClockSync();
-  };
-
-  ws.onmessage = e => {
-    const msg = JSON.parse(e.data);
-
-    if (msg.type === "pong") return handlePong(msg);
-    if (msg.type === "tracks") {
-      currentTrackList = {};
-      msg.tracks.forEach(t => currentTrackList[t.id] = t);
-      loadAudioFile();
-      return;
-    }
-    if (msg.type === "state") return handleState(msg.state);
-    if (msg.type === "seek") return handleSeek(msg);
-    if (msg.type === "stop") return handleStop();
-  };
-}
-
-connectWS();
+//==============================================================
+// END OF CLIENT
+//==============================================================

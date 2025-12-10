@@ -2,108 +2,147 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Berlin Menorah Parade 5786</title>
+<title>Berlin Menorah Parade 5786 — Sync</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
   body {
-    background: #0d0d0d;
-    color: white;
+    margin: 0;
+    padding: 0;
     font-family: Arial, sans-serif;
+    background: black;
+    color: white;
+    overflow-x: hidden;
+  }
+
+  /* BACKGROUND IMAGE */
+  #bg {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: url("Parade Flyer Berlin 86.jpg") center center / cover no-repeat;
+    filter: brightness(0.52);
+    z-index: -2;
+  }
+
+  /* DARK GRADIENT OVERLAY */
+  #overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.4), rgba(0,0,0,0.8));
+    z-index: -1;
+  }
+
+  /* CONTENT WRAPPER */
+  #wrap {
     padding: 20px;
     text-align: center;
   }
 
   h1 {
-    font-size: 1.7rem;
+    font-size: 1.8rem;
+    color: #1db954;
     margin-bottom: 10px;
-    color: #1db954; /* Spotify green */
   }
 
-  .panel {
-    background: #181818;
-    border: 1px solid #282828;
-    padding: 18px;
-    border-radius: 12px;
-    margin-top: 20px;
-  }
-
-  input, button {
-    width: 100%;
-    padding: 12px;
-    margin-top: 12px;
-    border-radius: 8px;
-    font-size: 1rem;
-    border: none;
-  }
-
-  input {
-    background: #2a2a2a;
-    color: white;
-  }
-
-  button {
-    background: #1db954;
-    color: #fff;
-    cursor: pointer;
-  }
-
-  button:disabled {
-    opacity: 0.4;
-  }
-
-  #pausePlayBtn {
-    background: #3b83f7;
-  }
-
-  #resyncBtn {
+  #langSelect {
     position: fixed;
-    bottom: 22px;
-    right: 22px;
-    width: 60px;
-    height: 60px;
+    top: 15px;
+    right: 15px;
+    padding: 8px;
     background: #1db954;
-    border-radius: 50%;
-    font-size: 1.7rem;
-    font-weight: bold;
-    color: #000;
     border: none;
+    border-radius: 6px;
+    font-weight: bold;
     cursor: pointer;
-    box-shadow: 0 0 10px #1db954;
+  }
+
+  #familyName {
+    width: 80%;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    margin-top: 10px;
+    background: rgba(0,0,0,0.55);
+    color: white;
+    font-size: 1.1rem;
+  }
+
+  #armBtn, #pauseBtn {
+    margin-top: 15px;
+    padding: 14px 24px;
+    border-radius: 10px;
+    border: none;
+    background: #1db954;
+    font-size: 1.2rem;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  #pauseBtn {
+    background: #ff5f5f;
+    display: none;
   }
 
   #statusBox {
-    margin-top: 16px;
-    text-align: left;
-    font-size: 1rem;
+    margin-top: 20px;
+    background: rgba(0,0,0,0.4);
+    padding: 14px;
+    border-radius: 12px;
+    font-size: 1.2rem;
   }
 
-  .statusGood { color: #1db954; }
-  .statusWarn { color: #ffcc33; }
+  #trackTitle {
+    margin-top: 10px;
+    font-size: 1.1rem;
+    color: #ccc;
+  }
 
+  #instructions {
+    margin-top: 22px;
+    font-size: 0.95rem;
+    color: #bbb;
+  }
 </style>
-</head>
 
+</head>
 <body>
 
-<h1>Berlin Menorah Parade 5786</h1>
+<div id="bg"></div>
+<div id="overlay"></div>
 
-<div class="panel">
-  <label>Family Name:</label>
-  <input id="nameInput" type="text" placeholder="Family Name Required">
+<select id="langSelect">
+  <option value="en">EN</option>
+  <option value="he">HE</option>
+  <option value="ru">RU</option>
+  <option value="de">DE</option>
+</select>
 
-  <button id="armBtn" disabled>ARM Audio</button>
-  <button id="pausePlayBtn" style="display:none;">Pause</button>
+<div id="wrap">
+
+  <h1 data-i18n="clientTitle">Berlin Menorah Parade 5786</h1>
+
+  <input id="familyName" type="text" data-i18n-placeholder="familyName" placeholder="Family Name">
+
+  <button id="armBtn" data-i18n="armBtn">ARM AUDIO</button>
+  <button id="pauseBtn" data-i18n="pauseBtn">PAUSE</button>
+
+  <div id="statusBox">
+    <div id="statusText" data-i18n="status">Status: Not Synced</div>
+    <div id="trackTitle" data-i18n="nowPlaying">Now Playing: —</div>
+  </div>
+
+  <div id="instructions" data-i18n="instructions">
+    If audio becomes unsynchronized, simply refresh the page.
+  </div>
+
 </div>
 
-<div id="statusBox" class="panel">
-  <div>Status: <span id="statusText">Connecting…</span></div>
-  <div>Sync: <span id="syncText">Not synced</span></div>
-  <div>Now Playing: <span id="nowPlayingText">Nothing</span></div>
-</div>
-
-<button id="resyncBtn">↻</button>
-
+<script src="translations.js"></script>
 <script src="client.js"></script>
+
 </body>
 </html>
