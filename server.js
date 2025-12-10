@@ -15,9 +15,57 @@ app.use(express.static(path.join(__dirname, "public")));
 const TRACKS = {
   "tyh": {
     id: "tyh",
-    name: "TYH Upmix",
-    file: "track.mp3",
+    name: "Thank You Hashem",
+    file: "TYH.mp3",
     duration: 532000
+  },
+  "matisyahu": {
+    id: "matisyahu",
+    name: "Matisyahu",
+    file: "Matisyahu.mp3",
+    duration: 247000
+  },
+  "yoniz": {
+    id: "yoniz",
+    name: "Yoni Z",
+    file: "Yoni Z.mp3",
+    duration: 151000
+  },
+  "mendykraus": {
+    id: "mendykraus",
+    name: "Mendy Kraus",
+    file: "Mendy Kraus.mp3",
+    duration: 803000
+  },
+  "meirshitrit": {
+    id: "meirshitrit",
+    name: "Meir Shitrit",
+    file: "Meir Shitrit.mp3",
+    duration: 2104000
+  },
+  "menachemlifshitz": {
+    id: "menachemlifshitz",
+    name: "Menachem Lifshitz",
+    file: "Menachem Lifshitz.mp3",
+    duration: 1460000
+  },
+  "chonimilecki": {
+    id: "chonimilecki",
+    name: "Choni Milecki",
+    file: "Choni Milecki.mp3",
+    duration: 1149000
+  },
+  "djshatz": {
+    id: "djshatz",
+    name: "DJ Shatz",
+    file: "DJ Shatz.mp3",
+    duration: 802000
+  },
+  "srulivnetanel": {
+    id: "srulivnetanel",
+    name: "Sruli & Netanel",
+    file: "Sruli V'Netanel.mp3",
+    duration: 206000
   }
 };
 
