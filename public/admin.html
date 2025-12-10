@@ -2,89 +2,149 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Berlin Menorah Parade 5786 – Admin Control</title>
+<title>Admin – Berlin Menorah Parade 5786</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
   body {
-    background: #081a33;
+    background: #0d0d0d;
     color: white;
     font-family: Arial, sans-serif;
+    margin: 0;
     padding: 20px;
   }
+
   h1 {
-    font-size: 1.4rem;
-    color: #7bc6ff;
-    text-shadow: 0 0 8px #3ea0ff;
-    margin-bottom: 20px;
+    text-align: center;
+    color: #1db954;
+    font-size: 1.8rem;
+    margin-bottom: 10px;
   }
-  .card {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    padding: 16px;
-    border-radius: 10px;
-    margin-bottom: 20px;
+
+  .panel {
+    background: #181818;
+    padding: 20px;
+    margin-top: 20px;
+    border-radius: 12px;
+    border: 1px solid #2a2a2a;
   }
-  input, select {
+
+  label {
+    font-size: 1rem;
+    display: block;
+    margin-top: 12px;
+  }
+
+  input, select, button {
     width: 100%;
-    padding: 10px;
     margin-top: 10px;
-    background: #0f2e5a;
-    color: white;
-    border: 1px solid #2d4f84;
-    border-radius: 8px;
-  }
-  button {
-    width: 100%;
     padding: 12px;
-    margin-top: 10px;
     border-radius: 8px;
+    font-size: 1rem;
     border: none;
-    font-size: 1.1rem;
+  }
+
+  input, select {
+    background: #2a2a2a;
+    color: white;
+  }
+
+  button {
+    background: #1db954;
+    color: black;
+    font-weight: bold;
     cursor: pointer;
   }
-  #stopBtn { background: #ff1744; color: #081a33; }
-  #seekSlider { width: 100%; margin-top: 15px; }
-  ul { list-style: none; padding-left: 0; }
-  li { margin: 6px 0; }
+
+  button:disabled {
+    opacity: 0.5;
+  }
+
+  /* SPOTIFY SLIDER */
+  #seekSlider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 6px;
+    background: #3a3a3a;
+    border-radius: 3px;
+    margin-top: 12px;
+    cursor: pointer;
+  }
+
+  #seekSlider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 16px;
+    width: 16px;
+    background: #1db954;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  #seekSlider::-moz-range-thumb {
+    height: 16px;
+    width: 16px;
+    background: #1db954;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  #timeDisplay {
+    margin-top: 8px;
+    font-size: 0.95rem;
+    color: #bbb;
+  }
+
+  #clientList li {
+    margin-top: 5px;
+  }
+
+  #pinScreen {
+    text-align: center;
+    padding-top: 80px;
+  }
 </style>
 </head>
 
 <body>
 
-<h1>Berlin Menorah Parade 5786 – Admin Panel</h1>
+<h1>Admin – Berlin Menorah Parade 5786</h1>
 
-<div id="pinScreen" class="card">
-  <h3>Enter Admin PIN</h3>
-  <input id="pinInput" type="password">
+<!-- PIN SCREEN -->
+<div id="pinScreen">
+  <h2>Enter Admin PIN</h2>
+  <input id="pinInput" type="password" placeholder="PIN">
   <button id="enterPinBtn">Enter</button>
-  <div id="pinError" style="color:red;"></div>
+  <div id="pinError" style="color:#ff5555; margin-top:10px;"></div>
 </div>
 
+<!-- MAIN ADMIN PANEL -->
 <div id="adminPanel" style="display:none;">
 
-  <div class="card">
-    <h3>Track & Position</h3>
+  <div class="panel">
+    <h2>Control Panel</h2>
 
-    <label>Track:</label>
+    <label>Current Track:</label>
     <select id="trackSelect"></select>
 
-    <input id="seekSlider" type="range" min="0" max="532000" value="0">
-    <div>Position: <span id="seekLabel">00:00 / 08:52</span></div>
-    <button id="seekGo">SEEK</button>
+    <label>Seek:</label>
+    <input id="seekSlider" type="range" min="0" max="100" value="0">
+    <div id="timeDisplay">00:00 / 00:00</div>
 
-    <button id="stopBtn">STOP</button>
+    <button id="seekGo">Apply Seek</button>
+    <button id="stopBtn" style="margin-top:15px; background:#ff5555; color:white;">
+      STOP Broadcast
+    </button>
   </div>
 
-  <div class="card">
-    <h3>Broadcast Status</h3>
-    <div>Mode: <span id="stateMode">Idle</span></div>
-    <div>Playback Timestamp: <span id="stateTime">00:00</span></div>
-    <div>Local Time: <span id="localClock">--:--:--</span></div>
+  <div class="panel">
+    <h2>Status</h2>
+    <div>Mode: <span id="stateMode">idle</span></div>
+    <div>Live Clock: <span id="localClock">--:--:--</span></div>
+    <div>Track Time: <span id="stateTime">00:00</span></div>
   </div>
 
-  <div class="card">
-    <h3>Connected Families</h3>
+  <div class="panel">
+    <h2>Connected Clients</h2>
     <ul id="clientList"></ul>
   </div>
 

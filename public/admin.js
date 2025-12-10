@@ -6,11 +6,12 @@ const enterPinBtn = document.getElementById("enterPinBtn");
 const pinError = document.getElementById("pinError");
 
 const adminPanel = document.getElementById("adminPanel");
+
 const trackSelect = document.getElementById("trackSelect");
-const stopBtn = document.getElementById("stopBtn");
 const seekSlider = document.getElementById("seekSlider");
-const seekLabel = document.getElementById("seekLabel");
+const timeDisplay = document.getElementById("timeDisplay");
 const seekGo = document.getElementById("seekGo");
+const stopBtn = document.getElementById("stopBtn");
 
 const stateMode = document.getElementById("stateMode");
 const stateTime = document.getElementById("stateTime");
@@ -19,56 +20,52 @@ const clientList = document.getElementById("clientList");
 
 let ws;
 let trackMap = {};
-let currentDuration = 532000;
-let playbackInterval = null;
+let currentDuration = 0;
+let playInterval = null;
 let lastState = null;
 
-// ------------ LIVE CLOCK ------------
+// ------------- LIVE CLOCK -------------
 setInterval(() => {
   const d = new Date();
-  const hh = d.getHours().toString().padStart(2, "0");
-  const mm = d.getMinutes().toString().padStart(2, "0");
-  const ss = d.getSeconds().toString().padStart(2, "0");
-  localClock.textContent = `${hh}:${mm}:${ss}`;
+  localClock.textContent =
+    d.toTimeString().split(" ")[0]; // HH:MM:SS
 }, 1000);
 
-function formatMs(ms) {
+// Format mm:ss
+function fmt(ms) {
   if (ms < 0) ms = 0;
   const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const ss = (s % 60).toString().padStart(2, "0");
-  return `${m}:${ss}`;
+  return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
 }
 
-// ------------ WEBSOCKET ------------
+// ------------- WEBSOCKET -------------
 function connectWS() {
   ws = new WebSocket(
-    location.protocol === "https:"
-      ? `wss://${location.host}`
-      : `ws://${location.host}`
+    location.protocol === "https:" ?
+    `wss://${location.host}` :
+    `ws://${location.host}`
   );
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({ type: "hello", role: "admin" }));
+    ws.send(JSON.stringify({ type:"hello", role:"admin" }));
   };
 
-  ws.onmessage = (e) => {
+  ws.onmessage = e => {
     const msg = JSON.parse(e.data);
 
     if (msg.type === "tracks") {
-      // Populate track dropdown
-      trackMap = {};
       trackSelect.innerHTML = "";
+      trackMap = {};
 
-      msg.tracks.forEach((t) => {
+      msg.tracks.forEach(t => {
         trackMap[t.id] = t;
-        const opt = document.createElement("option");
-        opt.value = t.id;
-        opt.textContent = t.name;
-        trackSelect.appendChild(opt);
+        const op = document.createElement("option");
+        op.value = t.id;
+        op.textContent = t.name;
+        trackSelect.appendChild(op);
       });
 
-      updateTrackDuration();
+      updateDuration();
     }
 
     if (msg.type === "state") {
@@ -76,83 +73,79 @@ function connectWS() {
     }
 
     if (msg.type === "clients") {
-      updateClientList(msg.clients);
+      updateClients(msg.clients);
     }
   };
 }
 
-// ------------ CLIENT LIST ------------
-function updateClientList(list) {
+// ------------- CLIENT LIST -------------
+function updateClients(list) {
   clientList.innerHTML = "";
-  list.forEach((c) => {
+  list.forEach(c => {
     const li = document.createElement("li");
-    li.innerHTML = `<strong>${c.name || "Unnamed"}</strong>
-      – Armed: ${c.armed ? "🟢" : "⚪"}
+    li.innerHTML =
+      `<strong>${c.name || "Unnamed"}</strong> 
+      – Armed: ${c.armed ? "🟢" : "⚪"} 
       – Playing: ${c.playing ? "▶" : "⏸"}`;
     clientList.appendChild(li);
   });
 }
 
-// ------------ TRACK DURATION ------------
-function updateTrackDuration() {
+// ------------- TRACK DURATIONS -------------
+function updateDuration() {
   const t = trackMap[trackSelect.value];
   if (!t) return;
   currentDuration = t.duration;
   seekSlider.max = currentDuration;
-  seekLabel.textContent = `00:00 / ${formatMs(currentDuration)}`;
+  timeDisplay.textContent = `00:00 / ${fmt(currentDuration)}`;
 }
 
-// When admin changes track manually
-trackSelect.onchange = () => {
-  updateTrackDuration();
-};
+trackSelect.onchange = () => { updateDuration(); };
 
-// ------------ STATE UPDATES ------------
-function clearPlaybackInterval() {
-  if (playbackInterval) {
-    clearInterval(playbackInterval);
-    playbackInterval = null;
+// ------------- STATE HANDLING -------------
+function clearPlayInterval() {
+  if (playInterval) {
+    clearInterval(playInterval);
+    playInterval = null;
   }
 }
 
 function updateState(st) {
   lastState = st;
+
   stateMode.textContent = st.mode;
 
-  // Make dropdown reflect the current track
   if (st.trackId && trackMap[st.trackId]) {
     trackSelect.value = st.trackId;
-    updateTrackDuration();
+    updateDuration();
   }
 
-  clearPlaybackInterval();
+  clearPlayInterval();
 
   if (st.mode === "playing") {
-    playbackInterval = setInterval(() => {
-      if (!lastState || lastState.mode !== "playing") {
-        clearPlaybackInterval();
-        return;
-      }
+    playInterval = setInterval(() => {
       const now = Date.now();
-      const offset = now - lastState.serverStartTime;
+      const offset = now - st.serverStartTime;
 
-      stateTime.textContent = formatMs(offset);
+      stateTime.textContent = fmt(offset);
       seekSlider.value = offset;
-      seekLabel.textContent = `${formatMs(offset)} / ${formatMs(currentDuration)}`;
+      timeDisplay.textContent = `${fmt(offset)} / ${fmt(currentDuration)}`;
+
     }, 200);
+
   } else if (st.mode === "paused") {
-    stateTime.textContent = formatMs(st.pausedAt || 0);
-    seekSlider.value = st.pausedAt || 0;
-    seekLabel.textContent = `${formatMs(st.pausedAt || 0)} / ${formatMs(currentDuration)}`;
+    stateTime.textContent = fmt(st.pausedAt);
+    seekSlider.value = st.pausedAt;
+    timeDisplay.textContent = `${fmt(st.pausedAt)} / ${fmt(currentDuration)}`;
+
   } else {
-    // idle or unknown
     stateTime.textContent = "00:00";
     seekSlider.value = 0;
-    seekLabel.textContent = `00:00 / ${formatMs(currentDuration)}`;
+    timeDisplay.textContent = `00:00 / ${fmt(currentDuration)}`;
   }
 }
 
-// ------------ BUTTONS ------------
+// ------------- CONTROLS -------------
 seekGo.onclick = () => {
   const offset = Number(seekSlider.value) || 0;
 
@@ -164,14 +157,14 @@ seekGo.onclick = () => {
 };
 
 seekSlider.oninput = () => {
-  seekLabel.textContent = `${formatMs(seekSlider.value)} / ${formatMs(currentDuration)}`;
+  timeDisplay.textContent = `${fmt(seekSlider.value)} / ${fmt(currentDuration)}`;
 };
 
 stopBtn.onclick = () => {
-  ws.send(JSON.stringify({ type: "stop" }));
+  ws.send(JSON.stringify({ type:"stop" }));
 };
 
-// ------------ PIN ------------
+// ------------- PIN SYSTEM -------------
 enterPinBtn.onclick = () => {
   if (pinInput.value.trim() === PIN) {
     pinScreen.style.display = "none";

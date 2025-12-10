@@ -2,75 +2,85 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Berlin Menorah Parade 5786 – Sync Client</title>
+<title>Berlin Menorah Parade 5786</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
   body {
-    background: #081a33;
+    background: #0d0d0d;
     color: white;
     font-family: Arial, sans-serif;
     padding: 20px;
     text-align: center;
   }
+
   h1 {
-    font-size: 1.6rem;
+    font-size: 1.7rem;
     margin-bottom: 10px;
-    color: #7bc6ff;
-    text-shadow: 0 0 8px #3ea0ff;
+    color: #1db954; /* Spotify green */
   }
+
   .panel {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
+    background: #181818;
+    border: 1px solid #282828;
     padding: 18px;
-    border-radius: 10px;
+    border-radius: 12px;
     margin-top: 20px;
   }
+
   input, button {
     width: 100%;
     padding: 12px;
     margin-top: 12px;
     border-radius: 8px;
-    background: #0e2a52;
-    color: white;
-    border: 1px solid #1b3f78;
     font-size: 1rem;
+    border: none;
   }
+
+  input {
+    background: #2a2a2a;
+    color: white;
+  }
+
   button {
+    background: #1db954;
+    color: #fff;
     cursor: pointer;
-    background: #134a9e;
-    border: 1px solid #2973d1;
   }
+
   button:disabled {
     opacity: 0.4;
   }
+
   #pausePlayBtn {
-    background: #1976ff;
-    border-color: #4aa3ff;
+    background: #3b83f7;
   }
+
   #resyncBtn {
     position: fixed;
     bottom: 22px;
     right: 22px;
     width: 60px;
     height: 60px;
-    background: #2bdcff;
+    background: #1db954;
     border-radius: 50%;
-    border: none;
-    box-shadow: 0 0 12px #2bdcff;
-    font-size: 1.5rem;
-    color: #081a33;
-    cursor: pointer;
+    font-size: 1.7rem;
     font-weight: bold;
+    color: #000;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 0 10px #1db954;
   }
+
   #statusBox {
     margin-top: 16px;
     text-align: left;
-    font-size: 0.95rem;
-    line-height: 1.5;
+    font-size: 1rem;
   }
-  .statusGood { color: #5dff9d; }
-  .statusWarn { color: #ffdd66; }
+
+  .statusGood { color: #1db954; }
+  .statusWarn { color: #ffcc33; }
+
 </style>
 </head>
 
@@ -80,7 +90,7 @@
 
 <div class="panel">
   <label>Family Name:</label>
-  <input id="nameInput" type="text" placeholder="Family name required">
+  <input id="nameInput" type="text" placeholder="Family Name Required">
 
   <button id="armBtn" disabled>ARM Audio</button>
   <button id="pausePlayBtn" style="display:none;">Pause</button>

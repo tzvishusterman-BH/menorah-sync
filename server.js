@@ -9,9 +9,6 @@ const wss = new WebSocket.Server({ server });
 
 app.use(express.static(path.join(__dirname, "public")));
 
-// ==========================
-// TRACK DEFINITIONS
-// ==========================
 const TRACKS = {
   "tyh": {
     id: "tyh",
@@ -69,20 +66,11 @@ const TRACKS = {
   }
 };
 
-let currentTrackId = "tyh";
-
-// ==========================
-// CONNECTION STORAGE
-// ==========================
 let clients = new Set();
 let adminClients = new Set();
-let clientMeta = new Map(); // ws → metadata
-
+let clientMeta = new Map();
 let nextClientId = 1;
 
-// ==========================
-// BROADCAST STATE
-// ==========================
 let broadcastState = {
   mode: "idle",
   trackId: "tyh",
@@ -90,80 +78,39 @@ let broadcastState = {
   pausedAt: null
 };
 
-// ==========================
-// HEARTBEAT FOR RENDER
-// ==========================
-function heartbeat() { this.isAlive = true; }
-
-setInterval(() => {
-  wss.clients.forEach(ws => {
-    if (!ws.isAlive) return ws.terminate();
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
-
-// ==========================
-// HELPERS
-// ==========================
-function broadcastToClients(obj) {
-  const json = JSON.stringify(obj);
-  for (const c of clients)
-    if (c.readyState === WebSocket.OPEN) c.send(json);
+function broadcastClients(obj) {
+  const data = JSON.stringify(obj);
+  for (const ws of clients)
+    if (ws.readyState === WebSocket.OPEN) ws.send(data);
 }
 
-function broadcastToAdmins(obj) {
-  const json = JSON.stringify(obj);
-  for (const a of adminClients)
-    if (a.readyState === WebSocket.OPEN) a.send(json);
+function broadcastAdmins(obj) {
+  const data = JSON.stringify(obj);
+  for (const ws of adminClients)
+    if (ws.readyState === WebSocket.OPEN) ws.send(data);
 }
 
-function broadcastStateUpdate() {
-  broadcastToClients({ type: "state", state: broadcastState });
-  broadcastToAdmins({ type: "state", state: broadcastState });
+function updateAll() {
+  broadcastClients({ type: "state", state: broadcastState });
+  broadcastAdmins({ type: "state", state: broadcastState });
 }
 
-function sendClientList() {
-  const list = [];
-  for (const ws of clients) {
-    const m = clientMeta.get(ws);
-    if (!m) continue;
-    list.push({
-      id: m.id,
-      name: m.name,
-      armed: m.armed,
-      playing: m.playing,
-      paused: m.paused
-    });
-  }
-  broadcastToAdmins({ type: "clients", clients: list });
-}
+wss.on("connection", ws => {
 
-// ==========================
-// MAIN CONNECTION HANDLER
-// ==========================
-wss.on("connection", (ws) => {
-  ws.isAlive = true;
-  ws.on("pong", heartbeat);
-
-  ws.role = "client"; // default
-
-  ws.on("message", (raw) => {
+  ws.on("message", raw => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // --------------------------
-    // HELLO / ROLE SETUP
-    // --------------------------
     if (msg.type === "hello") {
       if (msg.role === "admin") {
         ws.role = "admin";
         adminClients.add(ws);
 
-        ws.send(JSON.stringify({ type: "tracks", tracks: Object.values(TRACKS) }));
-        broadcastStateUpdate();
-        sendClientList();
-
+        ws.send(JSON.stringify({
+          type: "tracks",
+          tracks: Object.values(TRACKS)
+        }));
+        updateAll();
       } else {
         ws.role = "client";
         clients.add(ws);
@@ -172,119 +119,76 @@ wss.on("connection", (ws) => {
           id: nextClientId++,
           name: null,
           armed: false,
-          playing: false,
-          paused: false
+          playing: false
         });
 
-        ws.send(JSON.stringify({ type: "tracks", tracks: Object.values(TRACKS) }));
+        ws.send(JSON.stringify({
+          type: "tracks",
+          tracks: Object.values(TRACKS)
+        }));
         ws.send(JSON.stringify({ type: "state", state: broadcastState }));
-
-        sendClientList();
       }
       return;
     }
 
-    // --------------------------
-    // CLIENT EVENTS
-    // --------------------------
     if (ws.role === "client") {
+      const meta = clientMeta.get(ws);
+      if (!meta) return;
 
       if (msg.type === "register") {
-        const m = clientMeta.get(ws);
-        if (m) {
-          m.name = msg.name;
-          sendClientList();
-        }
-        return;
+        meta.name = msg.name;
       }
 
       if (msg.type === "armed") {
-        const m = clientMeta.get(ws);
-        if (m) {
-          m.armed = true;
-          sendClientList();
-        }
-        return;
+        meta.armed = true;
       }
 
       if (msg.type === "clientState") {
-        const m = clientMeta.get(ws);
-        if (m) {
-          m.playing = msg.playing;
-          m.paused = msg.paused;
-          sendClientList();
-        }
-        return;
+        meta.playing = msg.playing;
       }
-
-      if (msg.type === "ping") {
-        ws.send(JSON.stringify({
-          type: "pong",
-          clientSendTime: msg.clientSendTime,
-          serverTime: Date.now()
-        }));
-        return;
-      }
+      return;
     }
 
-    // --------------------------
-    // ADMIN CONTROLS
-    // --------------------------
     if (ws.role === "admin") {
 
-      // STOP
       if (msg.type === "stop") {
         broadcastState.mode = "idle";
         broadcastState.serverStartTime = null;
         broadcastState.pausedAt = null;
-
-        broadcastToClients({ type: "stop" });
-        broadcastStateUpdate();
+        broadcastClients({ type: "stop" });
+        updateAll();
         return;
       }
 
-      // SEEK (switch track + play at position)
       if (msg.type === "seek") {
-        const offset = msg.offsetMs;
-        const now = Date.now();
-
-        // update track
-        if (msg.trackId && TRACKS[msg.trackId]) {
-          currentTrackId = msg.trackId;
-          broadcastState.trackId = currentTrackId;
-        }
+        const offset = msg.offsetMs ?? 0;
 
         broadcastState.mode = "playing";
+        broadcastState.trackId = msg.trackId;
+        broadcastState.serverStartTime = Date.now() - offset;
         broadcastState.pausedAt = null;
-        broadcastState.serverStartTime = now - offset;
 
-        broadcastToClients({
+        broadcastClients({
           type: "seek",
-          serverStartTime: broadcastState.serverStartTime,
-          trackId: currentTrackId
+          trackId: msg.trackId,
+          serverStartTime: broadcastState.serverStartTime
         });
 
-        broadcastStateUpdate();
+        updateAll();
         return;
       }
     }
   });
 
-  // --------------------------
-  // DISCONNECT
-  // --------------------------
   ws.on("close", () => {
     clients.delete(ws);
     adminClients.delete(ws);
     clientMeta.delete(ws);
-    sendClientList();
   });
+
 });
 
-// ==========================
-// START SERVER
-// ==========================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, "0.0.0.0", () =>
-  console.log("Menorah Sync Server running on port", PORT)
+  console.log("Server running on port", PORT)
 );
