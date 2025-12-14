@@ -154,8 +154,8 @@ function pauseAll() {
 function resumeAll() {
   if (!state.playing || !state.paused || !state.trackId) return;
 
-  // new startTime that preserves paused position
-  state.startTime = Date.now() + START_LEAD_MS - state.pausedAtMs;
+  // ✅ instant resume: startTime set so "now" equals paused position
+  state.startTime = Date.now() - state.pausedAtMs;
   state.paused = false;
 
   broadcast(clients, { type: "play", trackId: state.trackId, startTime: state.startTime });
@@ -164,6 +164,7 @@ function resumeAll() {
 
   scheduleAutoAdvance();
 }
+
 
 function advanceToNextTrack() {
   const list = state.playlist || [];

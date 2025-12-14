@@ -11,6 +11,9 @@ const nowPlayingPill = document.getElementById("nowPlayingPill");
 
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
+// ✅ iOS audible output latency compensation (tune 700–1200ms)
+const IOS_LATENCY_MS = 950;
+
 let armed = false;
 let locallyPaused = false;
 
@@ -19,6 +22,8 @@ let bestRttMs = Infinity;
 
 let currentTrackId = null;
 let scheduledTimer = null;
+let unmuteTimer = null;
+let preRollTimer = null;
 
 function setStatus(t, good = false) {
   statusPill.textContent = "Status: " + t;
@@ -30,18 +35,26 @@ function setNowPlaying(t) {
 }
 
 function correctedNowMs() { return Date.now() + serverOffsetMs; }
+
+// ✅ iOS: seek slightly ahead so audible output lines up
 function expectedOffsetSec(startTimeMs) {
-  return Math.max(0, (correctedNowMs() - startTimeMs) / 1000);
+  const base = Math.max(0, (correctedNowMs() - startTimeMs) / 1000);
+  return isIOS ? (base + IOS_LATENCY_MS / 1000) : base;
 }
 
 function clearSchedule() {
   if (scheduledTimer) clearTimeout(scheduledTimer);
+  if (unmuteTimer) clearTimeout(unmuteTimer);
+  if (preRollTimer) clearTimeout(preRollTimer);
   scheduledTimer = null;
+  unmuteTimer = null;
+  preRollTimer = null;
 }
 
 function hardStopUnload() {
   clearSchedule();
   try { audio.pause(); } catch {}
+  try { audio.volume = 1; } catch {}
   audio.removeAttribute("src");
   audio.load();
   currentTrackId = null;
@@ -50,6 +63,7 @@ function hardStopUnload() {
 function stopButKeepSrc() {
   clearSchedule();
   try { audio.pause(); } catch {}
+  try { audio.volume = 1; } catch {}
 }
 
 async function timeSyncOnce() {
@@ -166,12 +180,39 @@ async function syncToParade(trackId, startTimeMs) {
     clearSchedule();
     setStatus(`Synced (starting in ${(delayMs / 1000).toFixed(1)}s)`, true);
 
+    // ✅ iOS pre-roll: start slightly early muted, then unmute at exact start
+    if (isIOS) {
+      const preRollIn = Math.max(0, delayMs - IOS_LATENCY_MS);
+
+      preRollTimer = setTimeout(async () => {
+        if (!armed || locallyPaused || state.paused) return;
+
+        await ensureTrackReady(trackId);
+        try { audio.currentTime = 0; } catch {}
+        try { audio.volume = 0; } catch {}
+
+        try {
+          await audio.play();
+          setStatus("Starting… (Synced)", true);
+        } catch {
+          setStatus("Tap PLAY (audio blocked)", false);
+        }
+      }, preRollIn);
+
+      unmuteTimer = setTimeout(() => {
+        try { audio.volume = 1; } catch {}
+      }, delayMs);
+
+      return;
+    }
+
+    // Non-iOS: normal countdown start
     scheduledTimer = setTimeout(async () => {
       if (!armed || locallyPaused || state.paused) return;
 
       await ensureTrackReady(trackId);
-
       try { audio.currentTime = 0; } catch {}
+
       try {
         await audio.play();
         setStatus("Playing (Synced)", true);
@@ -189,8 +230,9 @@ async function syncToParade(trackId, startTimeMs) {
 
   try {
     const playing = !audio.paused;
+    const target = clampSeekSeconds(trackId, shouldBe);
     const actual = audio.currentTime || 0;
-    const drift = Math.abs(actual - clampSeekSeconds(trackId, shouldBe));
+    const drift = Math.abs(actual - target);
 
     // If not playing, start now
     if (!playing) {
@@ -234,8 +276,9 @@ function startDriftLoop() {
     if (audio.paused) return;
 
     const shouldBe = expectedOffsetSec(state.startTime);
+    const target = clampSeekSeconds(state.trackId, shouldBe);
     const actual = audio.currentTime || 0;
-    const drift = actual - clampSeekSeconds(state.trackId, shouldBe);
+    const drift = actual - target;
 
     if (Math.abs(drift) > driftThreshold()) {
       try {
@@ -291,7 +334,7 @@ armBtn.onclick = async () => {
   await timeSyncOnce();
 
   // Late join guarantee
-  if (state.playing && state.trackId && state.startTime) {
+  if (state.playing && state.trackId && state.startTime && !state.paused) {
     await syncToParade(state.trackId, state.startTime);
   }
 };
@@ -312,7 +355,7 @@ pauseBtn.onclick = async () => {
   locallyPaused = false;
   pauseBtn.textContent = "PAUSE";
 
-  if (state.playing && state.trackId && state.startTime) {
+  if (state.playing && state.trackId && state.startTime && !state.paused) {
     await syncToParade(state.trackId, state.startTime);
   } else {
     setStatus("Armed (waiting…)", false);
@@ -358,6 +401,7 @@ ws.onmessage = async (e) => {
     }
 
     if (state.paused) {
+      clearSchedule();
       try { audio.pause(); } catch {}
       setStatus("Paused (Admin)", false);
       return;
@@ -376,6 +420,7 @@ ws.onmessage = async (e) => {
     state.playing = true;
     state.paused = true;
     state.trackId = msg.trackId;
+    clearSchedule();
     try { audio.pause(); } catch {}
     setStatus("Paused (Admin)", false);
     return;
