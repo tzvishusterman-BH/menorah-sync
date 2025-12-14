@@ -4,59 +4,90 @@
 <meta charset="UTF-8">
 <title>Admin — Berlin Menorah Parade 5786</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+
 <style>
-  body { margin:0; font-family:Arial,sans-serif; background:#0d0d0d; color:#fff; padding:18px; }
-  h1 { margin:0 0 14px; color:#4da3ff; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-  select, button { padding:12px; border-radius:10px; border:0; font-weight:800; }
-  select { background:#222; color:#fff; min-width:240px; }
-  button { cursor:pointer; }
-  .blue { background:#4da3ff; color:#001226; }
-  .red { background:#ff4444; color:#fff; }
-  .card { background:#181818; border:1px solid #2a2a2a; border-radius:14px; padding:14px; margin-top:14px; }
-  #nowPlaying { font-size:1.15rem; margin-top:10px; color:#fff; }
-  ul { margin:10px 0 0; padding-left:18px; }
-  .pill { display:inline-block; padding:8px 12px; border-radius:999px; background:#111; border:1px solid #2a2a2a; font-weight:900; }
+  body{
+    margin:0;
+    padding:18px;
+    font-family:Arial, sans-serif;
+    background:#0d0d0d;
+    color:#fff;
+  }
+  h1{
+    margin:0 0 14px;
+    color:#4da3ff;
+    font-weight:900;
+  }
+  .card{
+    background:#181818;
+    border:1px solid #2a2a2a;
+    border-radius:14px;
+    padding:14px;
+    max-width:620px;
+  }
+  .row{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    align-items:center;
+  }
+  select,button{
+    padding:12px;
+    border-radius:10px;
+    border:0;
+    font-weight:900;
+    font-size:16px;
+  }
+  select{
+    background:#222;
+    color:#fff;
+    min-width:260px;
+  }
+  button{
+    cursor:pointer;
+  }
+  .blue{
+    background:#4da3ff;
+    color:#001226;
+  }
+  .red{
+    background:#ff4444;
+    color:#fff;
+  }
+  #nowPlaying{
+    margin-top:12px;
+    font-size:18px;
+    font-weight:900;
+  }
+  .hint{
+    margin-top:10px;
+    color:rgba(255,255,255,0.75);
+    font-size:13px;
+    line-height:1.35;
+  }
 </style>
 </head>
+
 <body>
+  <h1>Admin — Berlin Menorah Parade 5786</h1>
 
-<h1>Admin — Berlin Menorah Parade 5786</h1>
+  <div class="card">
+    <div class="row">
+      <select id="trackSelect">
+        <option>Loading tracks…</option>
+      </select>
 
-<div class="card">
-  <div class="row">
-    <button id="startPlaylistBtn" class="blue">START PLAYLIST</button>
-    <button id="backBtn" class="blue">⏮ BACK</button>
-    <button id="skipBtn" class="blue">⏭ SKIP</button>
-    <button id="resyncBtn" class="blue">🔄 RESYNC ALL</button>
-    <button id="stopBtn" class="red">STOP</button>
+      <button id="playBtn" class="blue">PLAY</button>
+      <button id="stopBtn" class="red">STOP</button>
+    </div>
+
+    <div id="nowPlaying">Now Playing: —</div>
+
+    <div class="hint">
+      This is the hard-reset admin: choose a track → PLAY sends the command to all clients.
+    </div>
   </div>
 
-  <div style="height:10px;"></div>
-
-  <div class="row">
-    <select id="trackSelect"></select>
-    <button id="playSelectedBtn" class="blue">PLAY SELECTED</button>
-  </div>
-
-  <div style="height:10px;"></div>
-
-  <div class="row">
-    <span id="adminAudioStatus" class="pill">Admin Audio: Off</span>
-    <button id="adminAudioBtn" class="blue">ENABLE ADMIN AUDIO</button>
-  </div>
-
-  <div id="nowPlaying">Now Playing: —</div>
-</div>
-
-<div class="card">
-  <div style="font-weight:900;">Connected Cars</div>
-  <ul id="clients"></ul>
-</div>
-
-<!-- Admin audio player (hidden) -->
-<audio id="adminPlayer" playsinline preload="auto" style="display:none;"></audio>
-
-<script src="admin.js"></script>
+  <script src="admin.js"></script>
 </body>
 </html>
