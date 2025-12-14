@@ -7,7 +7,7 @@
 
 <style>
   :root{
-    --accent:#4da3ff;       /* blue accent */
+    --accent:#4da3ff;
     --accent2:#2b7dff;
     --card: rgba(8, 16, 30, 0.72);
     --border: rgba(255,255,255,0.14);
@@ -57,18 +57,12 @@
     flex-wrap:wrap;
   }
 
-  select,input,button{
+  input,button{
     padding:12px;
     border-radius:12px;
     border:0;
     font-size:16px;
     font-weight:800;
-  }
-
-  select{
-    background:rgba(77,163,255,0.92);
-    color:#001226;
-    cursor:pointer;
   }
 
   input{
@@ -82,15 +76,10 @@
     cursor:pointer;
     background:var(--accent);
     color:#001226;
-    min-width:160px;
+    min-width:170px;
     box-shadow: 0 10px 28px rgba(77,163,255,0.14);
   }
   button:hover{ background:var(--accent2); }
-  button:disabled{
-    opacity:0.45;
-    cursor:not-allowed;
-    box-shadow:none;
-  }
 
   .statusWrap{
     display:flex;
@@ -130,24 +119,28 @@
     height:auto;
     display:block;
   }
+
+  /* On-screen debug box */
+  #debugBox{
+    display:none;
+    width:min(560px, 94vw);
+    background:rgba(255,60,60,0.12);
+    border:1px solid rgba(255,60,60,0.35);
+    border-radius:14px;
+    padding:12px;
+    font-size:13px;
+    text-align:left;
+    white-space:pre-wrap;
+  }
 </style>
 </head>
 
 <body>
 <div class="overlay">
 
-    <audio id="iosPlayer" playsinline preload="auto" style="display:none;"></audio>
-
-  <div class="row" style="width:100%; justify-content:flex-end;">
-    <select id="langSelect" title="Language">
-      <option value="en">EN</option>
-      <option value="he">HE</option>
-      <option value="ru">RU</option>
-      <option value="de">DE</option>
-    </select>
-  </div>
-
   <h1>Berlin Menorah Parade 5786</h1>
+
+  <div id="debugBox"></div>
 
   <div class="card">
     <div style="font-weight:900; font-size:18px; margin-bottom:10px;">
@@ -171,10 +164,12 @@
     </div>
   </div>
 
-  <!-- Flyer visible on the page (not just as background) -->
   <div class="flyerFrame">
     <img src="flyer.jpg" alt="Berlin Menorah Parade Flyer">
   </div>
+
+  <!-- iOS native audio element -->
+  <audio id="iosPlayer" playsinline preload="auto" style="display:none;"></audio>
 
 </div>
 
