@@ -16,6 +16,7 @@
   .card { background:#181818; border:1px solid #2a2a2a; border-radius:14px; padding:14px; margin-top:14px; }
   #nowPlaying { font-size:1.15rem; margin-top:10px; color:#fff; }
   ul { margin:10px 0 0; padding-left:18px; }
+  .pill { display:inline-block; padding:8px 12px; border-radius:999px; background:#111; border:1px solid #2a2a2a; font-weight:900; }
 </style>
 </head>
 <body>
@@ -38,6 +39,13 @@
     <button id="playSelectedBtn" class="blue">PLAY SELECTED</button>
   </div>
 
+  <div style="height:10px;"></div>
+
+  <div class="row">
+    <span id="adminAudioStatus" class="pill">Admin Audio: Off</span>
+    <button id="adminAudioBtn" class="blue">ENABLE ADMIN AUDIO</button>
+  </div>
+
   <div id="nowPlaying">Now Playing: —</div>
 </div>
 
@@ -45,6 +53,9 @@
   <div style="font-weight:900;">Connected Cars</div>
   <ul id="clients"></ul>
 </div>
+
+<!-- Admin audio player (hidden) -->
+<audio id="adminPlayer" playsinline preload="auto" style="display:none;"></audio>
 
 <script src="admin.js"></script>
 </body>
