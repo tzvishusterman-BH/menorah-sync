@@ -6,15 +6,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
+  :root{
+    --accent:#4da3ff;       /* blue accent */
+    --accent2:#2b7dff;
+    --card: rgba(8, 16, 30, 0.72);
+    --border: rgba(255,255,255,0.14);
+    --textSoft: rgba(255,255,255,0.82);
+  }
+
   body{
     margin:0;
     font-family: Arial, sans-serif;
     color:#fff;
     background:url("Parade Flyer Berlin 86.jpg") center/cover no-repeat fixed;
   }
+
   .overlay{
     min-height:100vh;
-    background:rgba(0,0,0,0.78);
+    background:rgba(0,0,0,0.62);
     padding:18px;
     display:flex;
     flex-direction:column;
@@ -22,20 +31,24 @@
     gap:14px;
     text-align:center;
   }
+
   h1{
     margin:10px 0 0;
-    color:#1db954;
+    color:var(--accent);
     font-size:34px;
     font-weight:900;
+    text-shadow: 0 2px 14px rgba(77,163,255,0.25);
   }
+
   .card{
-    width:min(520px, 92vw);
-    background:rgba(10,10,10,0.72);
-    border:1px solid rgba(255,255,255,0.12);
-    border-radius:16px;
+    width:min(560px, 94vw);
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:18px;
     padding:16px;
     backdrop-filter: blur(6px);
   }
+
   .row{
     display:flex;
     gap:10px;
@@ -43,6 +56,7 @@
     align-items:center;
     flex-wrap:wrap;
   }
+
   select,input,button{
     padding:12px;
     border-radius:12px;
@@ -50,26 +64,34 @@
     font-size:16px;
     font-weight:800;
   }
+
   select{
-    background:#1db954;
-    color:#000;
+    background:rgba(77,163,255,0.92);
+    color:#001226;
+    cursor:pointer;
   }
+
   input{
-    width:min(420px, 80vw);
-    background:#111;
+    width:min(440px, 84vw);
+    background:rgba(0,0,0,0.45);
     color:#fff;
     border:1px solid rgba(255,255,255,0.18);
   }
+
   button{
     cursor:pointer;
-    background:#1db954;
-    color:#000;
+    background:var(--accent);
+    color:#001226;
     min-width:160px;
+    box-shadow: 0 10px 28px rgba(77,163,255,0.14);
   }
+  button:hover{ background:var(--accent2); }
   button:disabled{
     opacity:0.45;
     cursor:not-allowed;
+    box-shadow:none;
   }
+
   .statusWrap{
     display:flex;
     justify-content:space-between;
@@ -78,6 +100,7 @@
     margin-top:10px;
     flex-wrap:wrap;
   }
+
   .pill{
     padding:8px 12px;
     border-radius:999px;
@@ -85,17 +108,27 @@
     border:1px solid rgba(255,255,255,0.14);
     font-weight:900;
   }
-  .pill.good{ border-color: rgba(29,185,84,0.6); }
+  .pill.good{ border-color: rgba(77,163,255,0.75); }
   .pill.bad{ border-color: rgba(255,90,90,0.65); }
+
   .hint{
-    color:rgba(255,255,255,0.80);
+    color:var(--textSoft);
     font-size:14px;
     line-height:1.35;
     margin-top:8px;
   }
-  .tiny{
-    color:rgba(255,255,255,0.72);
-    font-size:13px;
+
+  .flyerFrame{
+    width:min(560px, 94vw);
+    border-radius:18px;
+    overflow:hidden;
+    border:1px solid rgba(255,255,255,0.10);
+    background:rgba(0,0,0,0.25);
+  }
+  .flyerFrame img{
+    width:100%;
+    height:auto;
+    display:block;
   }
 </style>
 </head>
@@ -134,10 +167,11 @@
     <div class="hint">
       If the audio ever feels out of sync, <b>refresh the page</b> to re-sync with everyone.
     </div>
+  </div>
 
-    <div class="tiny" style="margin-top:10px;">
-      Tip: Keep your screen on during the parade for best reliability.
-    </div>
+  <!-- Flyer visible on the page (not just as background) -->
+  <div class="flyerFrame">
+    <img src="Parade Flyer Berlin 86.jpg" alt="Berlin Menorah Parade Flyer">
   </div>
 
 </div>

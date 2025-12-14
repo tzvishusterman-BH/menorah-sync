@@ -7,7 +7,13 @@ let state = { playing:false, trackId:null, startTime:null };
 
 let source = null;
 let bufferCache = {}; // trackId -> AudioBuffer
+
 let locallyPaused = false;
+
+// These are the key anti-chop guards:
+let currentlyPlayingTrackId = null;
+let currentlyPlayingStartTime = null;
+let startedAtAudioCtxTime = null;
 
 const armBtn = document.getElementById("armBtn");
 const pauseBtn = document.getElementById("pauseBtn");
@@ -28,6 +34,9 @@ function setNowPlaying(text){
 function stopAudio(){
   try { if (source) source.stop(); } catch {}
   source = null;
+  startedAtAudioCtxTime = null;
+  currentlyPlayingTrackId = null;
+  currentlyPlayingStartTime = null;
 }
 
 async function loadBuffer(trackId){
@@ -43,17 +52,47 @@ async function loadBuffer(trackId){
   return buf;
 }
 
-async function playSynced(trackId, startTime){
+function getExpectedOffsetSec(serverStartTime){
+  return Math.max(0, (Date.now() - serverStartTime) / 1000);
+}
+
+function getCurrentPlaybackOffsetSec(){
+  if (!audioCtx || startedAtAudioCtxTime == null || currentlyPlayingStartTime == null) return null;
+  const elapsed = audioCtx.currentTime - startedAtAudioCtxTime;
+  return Math.max(0, elapsed);
+}
+
+// Start playback ONCE, and only restart if necessary
+async function ensurePlayingSynced(trackId, serverStartTime){
   if (!armed || !audioCtx) return;
-  if (locallyPaused) return; // user paused locally
+  if (locallyPaused) return;
 
   const t = tracks[trackId];
   setNowPlaying(t ? t.name : trackId);
 
+  // If we are already playing the right track, do NOT restart constantly.
+  if (source && currentlyPlayingTrackId === trackId && currentlyPlayingStartTime === serverStartTime) {
+    // Optional drift correction:
+    // If we drift more than 250ms, do a single resync.
+    const expected = getExpectedOffsetSec(serverStartTime);
+    const actual = getCurrentPlaybackOffsetSec();
+    if (actual != null) {
+      const drift = Math.abs(actual - expected);
+      if (drift < 0.25) {
+        // close enough — avoid choppy restarts
+        setStatus("Synced", true);
+        return;
+      }
+      // Drift is big: resync once
+    }
+  }
+
   const buf = await loadBuffer(trackId);
+
+  // Restart only when needed (track changed, startTime changed, or drift too large)
   stopAudio();
 
-  const offsetSec = Math.max(0, (Date.now() - startTime) / 1000);
+  const offsetSec = getExpectedOffsetSec(serverStartTime);
 
   source = audioCtx.createBufferSource();
   source.buffer = buf;
@@ -61,6 +100,10 @@ async function playSynced(trackId, startTime){
 
   try{
     source.start(0, offsetSec);
+    startedAtAudioCtxTime = audioCtx.currentTime;
+    currentlyPlayingTrackId = trackId;
+    currentlyPlayingStartTime = serverStartTime;
+
     setStatus("Synced", true);
     pauseBtn.textContent = "PAUSE";
   }catch(e){
@@ -72,7 +115,6 @@ async function playSynced(trackId, startTime){
 function updateArmEnabled(){
   armBtn.disabled = familyInput.value.trim().length === 0;
 }
-
 familyInput.addEventListener("input", updateArmEnabled);
 updateArmEnabled();
 
@@ -80,7 +122,6 @@ pauseBtn.addEventListener("click", async () => {
   if (!armed || !audioCtx) return;
 
   if (!locallyPaused) {
-    // pause locally
     locallyPaused = true;
     stopAudio();
     setStatus("Paused (tap Play to re-sync)", false);
@@ -88,12 +129,11 @@ pauseBtn.addEventListener("click", async () => {
     return;
   }
 
-  // resume -> re-sync to current parade timestamp
   locallyPaused = false;
   pauseBtn.textContent = "PAUSE";
 
   if (state.playing && state.trackId && state.startTime) {
-    await playSynced(state.trackId, state.startTime);
+    await ensurePlayingSynced(state.trackId, state.startTime);
   } else {
     setStatus("Armed (waiting…)", false);
   }
@@ -114,20 +154,25 @@ armBtn.addEventListener("click", async () => {
   armBtn.style.display = "none";
   pauseBtn.style.display = "inline-block";
 
+  setStatus("Armed (loading…)", false);
+
+  // Preload the currently playing track (reduces choppiness)
+  if (state.playing && state.trackId) {
+    try { await loadBuffer(state.trackId); } catch {}
+  }
+
   setStatus("Armed (waiting…)", false);
 
-  // If broadcast is already running, join immediately
+  // If broadcast already running, join immediately
   if (state.playing && state.trackId && state.startTime) {
-    await playSynced(state.trackId, state.startTime);
+    await ensurePlayingSynced(state.trackId, state.startTime);
   }
 });
 
 function init(){
   ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type:"hello", role:"client" }));
-  };
+  ws.onopen = () => ws.send(JSON.stringify({ type:"hello", role:"client" }));
 
   ws.onmessage = async (e) => {
     const msg = JSON.parse(e.data);
@@ -148,9 +193,10 @@ function init(){
         return;
       }
 
-      // If broadcast running, and we are armed + not paused, join/re-join
+      // IMPORTANT: do NOT restart audio constantly.
+      // Only ensure synced if armed + not paused.
       if (armed && !locallyPaused && state.startTime) {
-        await playSynced(state.trackId, state.startTime);
+        await ensurePlayingSynced(state.trackId, state.startTime);
       } else {
         const t = tracks[state.trackId];
         setNowPlaying(t ? t.name : state.trackId);
@@ -165,7 +211,9 @@ function init(){
       state.startTime = msg.startTime;
 
       if (armed && !locallyPaused) {
-        await playSynced(msg.trackId, msg.startTime);
+        // preload quickly then play
+        try { await loadBuffer(msg.trackId); } catch {}
+        await ensurePlayingSynced(msg.trackId, msg.startTime);
       } else {
         const t = tracks[msg.trackId];
         setNowPlaying(t ? t.name : msg.trackId);
