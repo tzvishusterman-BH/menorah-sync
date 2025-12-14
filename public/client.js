@@ -1,6 +1,6 @@
 let ws;
 let tracks = {};
-let state = { playing:false, trackId:null, startTime:null };
+let state = { playing: false, paused: false, trackId: null, startTime: null };
 
 const audio = document.getElementById("iosPlayer");
 const armBtn = document.getElementById("armBtn");
@@ -20,26 +20,26 @@ let bestRttMs = Infinity;
 let currentTrackId = null;
 let scheduledTimer = null;
 
-function setStatus(t, good=false){
+function setStatus(t, good = false) {
   statusPill.textContent = "Status: " + t;
-  statusPill.classList.remove("good","bad");
+  statusPill.classList.remove("good", "bad");
   statusPill.classList.add(good ? "good" : "bad");
 }
-function setNowPlaying(t){
+function setNowPlaying(t) {
   nowPlayingPill.textContent = "Now Playing: " + t;
 }
 
-function correctedNowMs(){ return Date.now() + serverOffsetMs; }
-function expectedOffsetSec(startTimeMs){
+function correctedNowMs() { return Date.now() + serverOffsetMs; }
+function expectedOffsetSec(startTimeMs) {
   return Math.max(0, (correctedNowMs() - startTimeMs) / 1000);
 }
 
-function clearSchedule(){
+function clearSchedule() {
   if (scheduledTimer) clearTimeout(scheduledTimer);
   scheduledTimer = null;
 }
 
-function hardStopUnload(){
+function hardStopUnload() {
   clearSchedule();
   try { audio.pause(); } catch {}
   audio.removeAttribute("src");
@@ -47,14 +47,14 @@ function hardStopUnload(){
   currentTrackId = null;
 }
 
-function stopButKeepSrc(){
+function stopButKeepSrc() {
   clearSchedule();
   try { audio.pause(); } catch {}
 }
 
-async function timeSyncOnce(){
+async function timeSyncOnce() {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type:"timeSync", clientSend: Date.now() }));
+    ws.send(JSON.stringify({ type: "timeSync", clientSend: Date.now() }));
   }
 }
 
@@ -80,7 +80,10 @@ async function ensureTrackReady(trackId) {
   const t = tracks[trackId];
   if (!t) return false;
 
-  const same = currentTrackId === trackId && audio.src && audio.src.includes(encodeURI(t.file));
+  const same = currentTrackId === trackId &&
+    audio.src &&
+    audio.src.includes(encodeURI(t.file));
+
   if (!same) {
     stopButKeepSrc();
     audio.src = t.file;
@@ -88,7 +91,6 @@ async function ensureTrackReady(trackId) {
     currentTrackId = trackId;
   }
 
-  // Make sure we have duration/metadata before seeking
   if (!Number.isFinite(audio.duration) || audio.duration === 0) {
     await waitAudioEvent("loadedmetadata", 3000);
   }
@@ -99,12 +101,12 @@ async function ensureTrackReady(trackId) {
 function clampSeekSeconds(trackId, seconds) {
   const t = tracks[trackId];
   const durMs = t?.duration;
+
   if (typeof durMs === "number" && durMs > 0) {
     const max = Math.max(0, (durMs / 1000) - 0.25);
     return Math.min(Math.max(0, seconds), max);
   }
 
-  // fallback to audio.duration if available
   if (Number.isFinite(audio.duration) && audio.duration > 0) {
     const max = Math.max(0, audio.duration - 0.25);
     return Math.min(Math.max(0, seconds), max);
@@ -121,23 +123,21 @@ async function seekReliable(trackId, seconds) {
   const target = clampSeekSeconds(trackId, seconds);
 
   try {
-    // iOS is finicky: set, then wait seeked
     audio.currentTime = target;
   } catch {
     return false;
   }
 
-  // If seeked never fires, we still proceed (best effort)
   await waitAudioEvent("seeked", 1200);
   return true;
 }
 
 // Thresholds: gentle on iOS
-function driftThreshold(){ return isIOS ? 1.2 : 0.35; }
-function driftLoopInterval(){ return isIOS ? 3500 : 1200; }
+function driftThreshold() { return isIOS ? 1.2 : 0.35; }
+function driftLoopInterval() { return isIOS ? 3500 : 1200; }
 
 // Main sync function
-async function syncToParade(trackId, startTimeMs){
+async function syncToParade(trackId, startTimeMs) {
   if (!armed) return;
   if (!trackId || !startTimeMs) return;
   const t = tracks[trackId];
@@ -145,6 +145,14 @@ async function syncToParade(trackId, startTimeMs){
 
   setNowPlaying(t.name);
 
+  // If admin paused, don't try to play
+  if (state.paused) {
+    try { audio.pause(); } catch {}
+    setStatus("Paused (Admin)", false);
+    return;
+  }
+
+  // If user paused locally, don’t force audio
   if (locallyPaused) {
     setStatus("Paused (tap PLAY to re-sync)", false);
     return;
@@ -156,16 +164,14 @@ async function syncToParade(trackId, startTimeMs){
   if (delayMs > 0) {
     stopButKeepSrc();
     clearSchedule();
-    setStatus(`Synced (starting in ${(delayMs/1000).toFixed(1)}s)`, true);
+    setStatus(`Synced (starting in ${(delayMs / 1000).toFixed(1)}s)`, true);
 
     scheduledTimer = setTimeout(async () => {
-      if (!armed || locallyPaused) return;
+      if (!armed || locallyPaused || state.paused) return;
 
-      // start exactly at 0
       await ensureTrackReady(trackId);
-      try {
-        audio.currentTime = 0;
-      } catch {}
+
+      try { audio.currentTime = 0; } catch {}
       try {
         await audio.play();
         setStatus("Playing (Synced)", true);
@@ -179,8 +185,6 @@ async function syncToParade(trackId, startTimeMs){
 
   // Already started: late join / resync to correct position
   const shouldBe = expectedOffsetSec(startTimeMs);
-
-  // Make sure seek is applied AFTER metadata is ready
   const seekOk = await seekReliable(trackId, shouldBe);
 
   try {
@@ -191,7 +195,6 @@ async function syncToParade(trackId, startTimeMs){
     // If not playing, start now
     if (!playing) {
       if (!seekOk) {
-        // fallback: load and play from 0
         await ensureTrackReady(trackId);
         try { audio.currentTime = 0; } catch {}
       }
@@ -200,10 +203,9 @@ async function syncToParade(trackId, startTimeMs){
       return;
     }
 
-    // While playing, only hard-correct if very off
+    // While playing, only correct if significantly off
     if (drift > driftThreshold()) {
       if (isIOS) {
-        // avoid pause/play churn
         await seekReliable(trackId, shouldBe);
         setStatus("Playing (Resynced)", true);
       } else {
@@ -222,11 +224,12 @@ async function syncToParade(trackId, startTimeMs){
 
 // Drift correction loop
 let driftTimer = null;
-function startDriftLoop(){
+function startDriftLoop() {
   if (driftTimer) clearInterval(driftTimer);
   driftTimer = setInterval(async () => {
     if (!armed) return;
     if (locallyPaused) return;
+    if (state.paused) return;
     if (!state.playing || !state.trackId || !state.startTime) return;
     if (audio.paused) return;
 
@@ -259,10 +262,10 @@ armBtn.onclick = async () => {
     return;
   }
 
-  // register name
+  // register name for admin list
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type:"register", name }));
+      ws.send(JSON.stringify({ type: "register", name }));
     }
   } catch {}
 
@@ -287,7 +290,7 @@ armBtn.onclick = async () => {
 
   await timeSyncOnce();
 
-  // ✅ Late join guarantee
+  // Late join guarantee
   if (state.playing && state.trackId && state.startTime) {
     await syncToParade(state.trackId, state.startTime);
   }
@@ -320,7 +323,7 @@ pauseBtn.onclick = async () => {
 ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
 ws.onopen = () => {
-  ws.send(JSON.stringify({ type:"hello", role:"client" }));
+  ws.send(JSON.stringify({ type: "hello", role: "client" }));
   timeSyncOnce();
   setInterval(timeSyncOnce, 2000);
 };
@@ -354,6 +357,12 @@ ws.onmessage = async (e) => {
       return;
     }
 
+    if (state.paused) {
+      try { audio.pause(); } catch {}
+      setStatus("Paused (Admin)", false);
+      return;
+    }
+
     if (!armed) {
       setStatus("Broadcast running — ARM to join", false);
       return;
@@ -363,8 +372,32 @@ ws.onmessage = async (e) => {
     return;
   }
 
+  if (msg.type === "pause") {
+    state.playing = true;
+    state.paused = true;
+    state.trackId = msg.trackId;
+    try { audio.pause(); } catch {}
+    setStatus("Paused (Admin)", false);
+    return;
+  }
+
+  if (msg.type === "preload") {
+    // best-effort preload next track
+    const t = tracks[msg.trackId];
+    if (t) {
+      try {
+        const a = new Audio();
+        a.preload = "auto";
+        a.src = t.file;
+        a.load();
+      } catch {}
+    }
+    return;
+  }
+
   if (msg.type === "play" || msg.type === "resync") {
     state.playing = true;
+    state.paused = false;
     state.trackId = msg.trackId;
     state.startTime = msg.startTime;
 
@@ -379,6 +412,7 @@ ws.onmessage = async (e) => {
 
   if (msg.type === "stop") {
     state.playing = false;
+    state.paused = false;
     state.trackId = null;
     state.startTime = null;
     hardStopUnload();

@@ -1,11 +1,43 @@
+// ===== PIN gate =====
+const PIN_CODE = "130865";
+const gate = document.getElementById("pinGate");
+const pinInput = document.getElementById("pinInput");
+const pinBtn = document.getElementById("pinBtn");
+const pinMsg = document.getElementById("pinMsg");
+
+function unlockIfSaved(){
+  if (localStorage.getItem("admin_unlocked") === "1") gate.style.display = "none";
+}
+unlockIfSaved();
+
+pinBtn.onclick = () => {
+  if (pinInput.value.trim() === PIN_CODE) {
+    localStorage.setItem("admin_unlocked", "1");
+    gate.style.display = "none";
+  } else {
+    pinMsg.style.display = "block";
+    setTimeout(() => pinMsg.style.display = "none", 1200);
+  }
+};
+
+// ===== WebSocket + state =====
 let ws;
 let tracks = {};
-let state = { playing:false, trackId:null, startTime:null };
+let state = { playing:false, paused:false, trackId:null, startTime:null, playlist:[], playlistIndex:0 };
 
 const trackSelect = document.getElementById("trackSelect");
 const nowPlayingEl = document.getElementById("nowPlaying");
 const clockEl = document.getElementById("clock");
 const countdownEl = document.getElementById("countdown");
+const pausePlayBtn = document.getElementById("pausePlayBtn");
+const stopBtn = document.getElementById("stopBtn");
+const nextBtn = document.getElementById("nextBtn");
+const backBtn = document.getElementById("backBtn");
+const playSelectedBtn = document.getElementById("playSelectedBtn");
+
+const addToPlaylistBtn = document.getElementById("addToPlaylistBtn");
+const playlistEl = document.getElementById("playlist");
+
 const clientsEl = document.getElementById("clients");
 const carsCountEl = document.getElementById("carsCount");
 
@@ -13,13 +45,11 @@ let serverOffsetMs = 0;
 let bestRttMs = Infinity;
 
 function correctedNowMs(){ return Date.now() + serverOffsetMs; }
-
 function timeSyncOnce(){
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type:"timeSync", clientSend: Date.now() }));
   }
 }
-
 function fmtTime(ms){
   const d = new Date(ms);
   const hh = String(d.getHours()).padStart(2,"0");
@@ -28,30 +58,129 @@ function fmtTime(ms){
   return `${hh}:${mm}:${ss}`;
 }
 
-function renderNowPlaying(){
-  if (!state.playing || !state.trackId) {
-    nowPlayingEl.textContent = "Now Playing: —";
-    countdownEl.textContent = "Countdown: —";
-    return;
-  }
-  nowPlayingEl.textContent = "Now Playing: " + (tracks[state.trackId]?.name || state.trackId);
-}
+function renderTop(){
+  const now = correctedNowMs();
+  clockEl.textContent = fmtTime(now);
 
-function renderCountdown(){
   if (!state.playing || !state.trackId || !state.startTime) {
     countdownEl.textContent = "Countdown: —";
+    nowPlayingEl.textContent = "Now Playing: —";
+    pausePlayBtn.textContent = "PAUSE";
     return;
   }
-  const leftMs = state.startTime - correctedNowMs();
+
+  const tName = tracks[state.trackId]?.name || state.trackId;
+  nowPlayingEl.textContent = `Now Playing: ${tName}`;
+
+  if (state.paused) {
+    countdownEl.textContent = "Paused";
+    pausePlayBtn.textContent = "PLAY";
+    return;
+  }
+
+  const leftMs = state.startTime - now;
   if (leftMs > 0) countdownEl.textContent = `Countdown: ${(leftMs/1000).toFixed(1)}s`;
-  else countdownEl.textContent = "Countdown: LIVE";
+  else countdownEl.textContent = "LIVE";
+
+  pausePlayBtn.textContent = "PAUSE";
 }
 
-setInterval(() => {
-  clockEl.textContent = fmtTime(correctedNowMs());
-  renderCountdown();
-}, 100);
+setInterval(renderTop, 100);
 
+function renderTrackDropdown(){
+  trackSelect.innerHTML = "";
+  Object.values(tracks).forEach(t => {
+    const opt = document.createElement("option");
+    opt.value = t.id;
+    opt.textContent = t.name;
+    trackSelect.appendChild(opt);
+  });
+}
+
+function renderPlaylist(){
+  playlistEl.innerHTML = "";
+  const pl = state.playlist || [];
+  pl.forEach((id, idx) => {
+    const li = document.createElement("li");
+    li.className = "pl-item";
+    li.dataset.trackId = id;
+
+    const handle = document.createElement("div");
+    handle.className = "handle";
+    handle.textContent = "≡";
+
+    const name = document.createElement("div");
+    name.className = "pl-name";
+    name.textContent = tracks[id]?.name || id;
+
+    const actions = document.createElement("div");
+    actions.className = "pl-actions";
+
+    const playBtn = document.createElement("button");
+    playBtn.textContent = "Play";
+    playBtn.className = "gray";
+    playBtn.onclick = () => {
+      ws.send(JSON.stringify({ type:"playAtIndex", index: idx }));
+    };
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "✕";
+    delBtn.className = "gray";
+    delBtn.onclick = () => {
+      const next = pl.slice(0, idx).concat(pl.slice(idx+1));
+      ws.send(JSON.stringify({ type:"setPlaylist", playlist: next }));
+    };
+
+    actions.appendChild(playBtn);
+    actions.appendChild(delBtn);
+
+    li.appendChild(handle);
+    li.appendChild(name);
+    li.appendChild(actions);
+    playlistEl.appendChild(li);
+  });
+}
+
+// Drag & drop reorder
+new Sortable(playlistEl, {
+  handle: ".handle",
+  animation: 150,
+  onEnd: () => {
+    const ids = [...playlistEl.querySelectorAll(".pl-item")].map(li => li.dataset.trackId);
+    ws.send(JSON.stringify({ type:"setPlaylist", playlist: ids }));
+  }
+});
+
+addToPlaylistBtn.onclick = () => {
+  const id = trackSelect.value;
+  const pl = (state.playlist || []).slice();
+  pl.push(id);
+  ws.send(JSON.stringify({ type:"setPlaylist", playlist: pl }));
+};
+
+playSelectedBtn.onclick = () => {
+  ws.send(JSON.stringify({ type:"playTrack", trackId: trackSelect.value }));
+};
+
+pausePlayBtn.onclick = () => {
+  ws.send(JSON.stringify({ type:"togglePause" }));
+};
+
+stopBtn.onclick = () => ws.send(JSON.stringify({ type:"stop" }));
+nextBtn.onclick = () => ws.send(JSON.stringify({ type:"next" }));
+backBtn.onclick = () => ws.send(JSON.stringify({ type:"back" }));
+
+function renderClients(list){
+  carsCountEl.textContent = `Cars: ${list.length}`;
+  clientsEl.innerHTML = "";
+  list.forEach(n => {
+    const li = document.createElement("li");
+    li.textContent = n;
+    clientsEl.appendChild(li);
+  });
+}
+
+// WebSocket
 ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
 ws.onopen = () => {
@@ -76,60 +205,21 @@ ws.onmessage = (e) => {
 
   if (msg.type === "tracks") {
     tracks = msg.tracks || {};
-    trackSelect.innerHTML = "";
-    Object.values(tracks).forEach(t => {
-      const o = document.createElement("option");
-      o.value = t.id;
-      o.textContent = t.name;
-      trackSelect.appendChild(o);
-    });
-    renderNowPlaying();
+    renderTrackDropdown();
+    renderPlaylist();
     return;
   }
 
   if (msg.type === "state") {
     state = msg.state || state;
-    renderNowPlaying();
-    return;
-  }
-
-  if (msg.type === "play" || msg.type === "resync") {
-    state.playing = true;
-    state.trackId = msg.trackId;
-    state.startTime = msg.startTime;
-    renderNowPlaying();
-    return;
-  }
-
-  if (msg.type === "stop") {
-    state.playing = false;
-    state.trackId = null;
-    state.startTime = null;
-    renderNowPlaying();
+    renderPlaylist();
     return;
   }
 
   if (msg.type === "clients") {
-    const list = msg.list || [];
-    carsCountEl.textContent = `Cars: ${list.length}`;
-    clientsEl.innerHTML = "";
-    list.forEach(n => {
-      const li = document.createElement("li");
-      li.textContent = n;
-      clientsEl.appendChild(li);
-    });
+    renderClients(msg.list || []);
     return;
   }
-};
 
-document.getElementById("playBtn").onclick = () => {
-  ws.send(JSON.stringify({ type:"play", trackId: trackSelect.value }));
-};
-
-document.getElementById("resyncBtn").onclick = () => {
-  ws.send(JSON.stringify({ type:"resync" }));
-};
-
-document.getElementById("stopBtn").onclick = () => {
-  ws.send(JSON.stringify({ type:"stop" }));
+  // preload notice is optional (we don't need to do anything on admin)
 };
