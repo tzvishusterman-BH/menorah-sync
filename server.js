@@ -24,28 +24,37 @@ const TRACKS = {
   srulivnetanel: { id: "srulivnetanel", name: "Sruli & Netanel", file: "Sruli V'Netanel.mp3", duration: 206000 }
 };
 
-// ==========================
-// STATE
-// ==========================
-let playlist = Object.keys(TRACKS);
+// Default playlist order (Option B)
+let playlist = [
+  "tyh",
+  "matisyahu",
+  "yoniz",
+  "mendykraus",
+  "meirshitrit",
+  "menachemlifshitz",
+  "chonimilecki",
+  "djshatz",
+  "srulivnetanel"
+];
+
 let currentIndex = -1;
+
+// Broadcast state
 let state = {
   playing: false,
   trackId: null,
   startTime: null
 };
 
+let nextTimer = null;
+
+// Connections
 const clients = new Set();
 const admins = new Set();
-const clientNames = new Map();
+const clientNames = new Map(); // ws -> string
 
-// ==========================
-// HELPERS
-// ==========================
 function send(ws, obj) {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(obj));
-  }
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
 function broadcast(set, obj) {
@@ -55,35 +64,95 @@ function broadcast(set, obj) {
   }
 }
 
-// ==========================
-// PLAYBACK ENGINE
-// ==========================
-function startTrackByIndex(index) {
-  if (index < 0 || index >= playlist.length) return;
+function broadcastState() {
+  broadcast(admins, { type: "state", state });
+  broadcast(clients, { type: "state", state });
+}
+
+function broadcastClientsList() {
+  broadcast(admins, { type: "clients", list: [...clientNames.values()] });
+}
+
+function clearNextTimer() {
+  if (nextTimer) clearTimeout(nextTimer);
+  nextTimer = null;
+}
+
+function scheduleAutoNext() {
+  clearNextTimer();
+  if (!state.playing || !state.trackId) return;
+
+  const dur = TRACKS[state.trackId]?.duration;
+  if (!dur) return;
+
+  nextTimer = setTimeout(() => {
+    playByIndex((currentIndex + 1) % playlist.length);
+  }, dur);
+}
+
+function playByIndex(index) {
+  if (!playlist.length) return;
+  if (index < 0) index = playlist.length - 1;
+  if (index >= playlist.length) index = 0;
+
+  const trackId = playlist[index];
+  if (!TRACKS[trackId]) return;
 
   currentIndex = index;
-  const trackId = playlist[index];
 
   state.playing = true;
   state.trackId = trackId;
   state.startTime = Date.now();
 
-  broadcast(clients, {
-    type: "play",
-    trackId,
-    startTime: state.startTime
-  });
+  // Tell clients to play this track at this startTime
+  broadcast(clients, { type: "play", trackId, startTime: state.startTime });
 
-  broadcast(admins, { type: "state", state });
+  // Update admins + clients with state
+  broadcastState();
 
-  setTimeout(() => {
-    startTrackByIndex((currentIndex + 1) % playlist.length);
-  }, TRACKS[trackId].duration);
+  // Auto-advance
+  scheduleAutoNext();
 }
 
-// ==========================
-// WEBSOCKET
-// ==========================
+function startPlaylist() {
+  playByIndex(0);
+}
+
+function playTrack(trackId) {
+  const idx = playlist.indexOf(trackId);
+  if (idx === -1) return;
+  playByIndex(idx);
+}
+
+function skip() {
+  if (!playlist.length) return;
+  playByIndex((currentIndex + 1) % playlist.length);
+}
+
+function back() {
+  if (!playlist.length) return;
+
+  // Back Rule A (same as earlier): if > 5s into track, restart same track, else previous
+  if (state.playing && state.startTime) {
+    const msInto = Date.now() - state.startTime;
+    if (msInto > 5000) {
+      playByIndex(currentIndex);
+      return;
+    }
+  }
+  playByIndex(currentIndex - 1);
+}
+
+function stop() {
+  clearNextTimer();
+  state.playing = false;
+  state.trackId = null;
+  state.startTime = null;
+
+  broadcast(clients, { type: "stop" });
+  broadcastState();
+}
+
 wss.on("connection", (ws) => {
   ws.role = null;
 
@@ -91,15 +160,16 @@ wss.on("connection", (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // ---- HELLO ----
     if (msg.type === "hello") {
       ws.role = msg.role;
 
       if (ws.role === "client") {
         clients.add(ws);
         send(ws, { type: "tracks", tracks: TRACKS });
+        send(ws, { type: "playlist", playlist });
         send(ws, { type: "state", state });
-        broadcast(admins, { type: "clients", list: [...clientNames.values()] });
+        broadcastClientsList();
+        return;
       }
 
       if (ws.role === "admin") {
@@ -107,22 +177,40 @@ wss.on("connection", (ws) => {
         send(ws, { type: "tracks", tracks: TRACKS });
         send(ws, { type: "playlist", playlist });
         send(ws, { type: "state", state });
+        broadcastClientsList();
+        return;
+      }
+    }
+
+    if (ws.role === "client") {
+      if (msg.type === "register") {
+        const name = String(msg.name || "").trim();
+        if (name) clientNames.set(ws, name);
+        broadcastClientsList();
       }
       return;
     }
 
-    // ---- CLIENT ----
-    if (ws.role === "client") {
-      if (msg.type === "register") {
-        clientNames.set(ws, msg.name);
-        broadcast(admins, { type: "clients", list: [...clientNames.values()] });
-      }
-    }
-
-    // ---- ADMIN ----
     if (ws.role === "admin") {
       if (msg.type === "startPlaylist") {
-        startTrackByIndex(0);
+        startPlaylist();
+        return;
+      }
+      if (msg.type === "playTrack") {
+        if (TRACKS[msg.trackId]) playTrack(msg.trackId);
+        return;
+      }
+      if (msg.type === "skip") {
+        skip();
+        return;
+      }
+      if (msg.type === "back") {
+        back();
+        return;
+      }
+      if (msg.type === "stop") {
+        stop();
+        return;
       }
     }
   });
@@ -131,10 +219,11 @@ wss.on("connection", (ws) => {
     clients.delete(ws);
     admins.delete(ws);
     clientNames.delete(ws);
-    broadcast(admins, { type: "clients", list: [...clientNames.values()] });
+    broadcastClientsList();
   });
 });
 
-server.listen(process.env.PORT || 3000, () =>
-  console.log("Menorah Sync running")
-);
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("Menorah Sync running on port", PORT);
+});
