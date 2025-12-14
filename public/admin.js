@@ -10,6 +10,7 @@ const startPlaylistBtn = document.getElementById("startPlaylistBtn");
 const playSelectedBtn = document.getElementById("playSelectedBtn");
 const backBtn = document.getElementById("backBtn");
 const skipBtn = document.getElementById("skipBtn");
+const resyncBtn = document.getElementById("resyncBtn");
 const stopBtn = document.getElementById("stopBtn");
 
 ws = new WebSocket(location.origin.replace(/^http/, "ws"));
@@ -68,4 +69,5 @@ startPlaylistBtn.onclick = () => ws.send(JSON.stringify({ type:"startPlaylist" }
 playSelectedBtn.onclick = () => ws.send(JSON.stringify({ type:"playTrack", trackId: trackSelect.value }));
 backBtn.onclick = () => ws.send(JSON.stringify({ type:"back" }));
 skipBtn.onclick = () => ws.send(JSON.stringify({ type:"skip" }));
+resyncBtn.onclick = () => ws.send(JSON.stringify({ type:"resync" }));
 stopBtn.onclick = () => ws.send(JSON.stringify({ type:"stop" }));

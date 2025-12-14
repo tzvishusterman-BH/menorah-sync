@@ -157,6 +157,29 @@ function stop() {
   broadcastState();
 }
 
+function resyncAll() {
+  if (!state.playing || !state.trackId || !state.startTime) return;
+
+  // How far into the track should we be right now?
+  const elapsedMs = Date.now() - state.startTime;
+  const elapsedClamped = Math.max(0, elapsedMs);
+
+  // New start time in the future (so everyone can line up)
+  const newStartTime = Date.now() + START_LEAD_MS - elapsedClamped;
+
+  // Update state and broadcast a resync
+  state.startTime = newStartTime;
+
+  broadcast(clients, {
+    type: "resync",
+    trackId: state.trackId,
+    startTime: state.startTime
+  });
+
+  broadcastState();
+}
+
+
 wss.on("connection", (ws) => {
   ws.role = null;
 

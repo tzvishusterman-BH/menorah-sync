@@ -230,6 +230,18 @@ function init(){
       return;
     }
 
+    if (msg.type === "resync") {
+  // treat resync like play
+  state.playing = true;
+  state.trackId = msg.trackId;
+  state.startTime = msg.startTime;
+  if (armed && !locallyPaused) {
+    await startPlaybackAtServerTime(msg.trackId, msg.startTime);
+  }
+  return;
+}
+
+
     if (msg.type === "tracks") { tracks = msg.tracks || {}; return; }
 
     if (msg.type === "state") {

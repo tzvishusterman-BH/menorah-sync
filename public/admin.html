@@ -6,12 +6,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body { margin:0; font-family:Arial,sans-serif; background:#0d0d0d; color:#fff; padding:18px; }
-  h1 { margin:0 0 14px; color:#1db954; }
+  h1 { margin:0 0 14px; color:#4da3ff; }
   .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   select, button { padding:12px; border-radius:10px; border:0; font-weight:800; }
   select { background:#222; color:#fff; min-width:240px; }
   button { cursor:pointer; }
-  .green { background:#1db954; color:#000; }
+  .blue { background:#4da3ff; color:#001226; }
   .red { background:#ff4444; color:#fff; }
   .card { background:#181818; border:1px solid #2a2a2a; border-radius:14px; padding:14px; margin-top:14px; }
   #nowPlaying { font-size:1.15rem; margin-top:10px; color:#fff; }
@@ -24,9 +24,10 @@
 
 <div class="card">
   <div class="row">
-    <button id="startPlaylistBtn" class="green">START PLAYLIST</button>
-    <button id="backBtn" class="green">⏮ BACK</button>
-    <button id="skipBtn" class="green">⏭ SKIP</button>
+    <button id="startPlaylistBtn" class="blue">START PLAYLIST</button>
+    <button id="backBtn" class="blue">⏮ BACK</button>
+    <button id="skipBtn" class="blue">⏭ SKIP</button>
+    <button id="resyncBtn" class="blue">🔄 RESYNC ALL</button>
     <button id="stopBtn" class="red">STOP</button>
   </div>
 
@@ -34,7 +35,7 @@
 
   <div class="row">
     <select id="trackSelect"></select>
-    <button id="playSelectedBtn" class="green">PLAY SELECTED</button>
+    <button id="playSelectedBtn" class="blue">PLAY SELECTED</button>
   </div>
 
   <div id="nowPlaying">Now Playing: —</div>
