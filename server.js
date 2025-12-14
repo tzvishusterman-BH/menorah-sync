@@ -10,7 +10,7 @@ const wss = new WebSocket.Server({ server });
 app.use(express.static(path.join(__dirname, "public")));
 
 // ==========================
-// TRACK DEFINITIONS (ALL)
+// TRACK DEFINITIONS
 // ==========================
 const TRACKS = {
   tyh: { id: "tyh", name: "Thank You Hashem", file: "TYH.mp3", duration: 532000 },
@@ -24,16 +24,16 @@ const TRACKS = {
   srulivnetanel: { id: "srulivnetanel", name: "Sruli & Netanel", file: "Sruli V'Netanel.mp3", duration: 206000 }
 };
 
-const START_LEAD_MS = 2500; // countdown before (re)start
-const NEXT_PRELOAD_LEAD_MS = 2500; // when we notify clients of next track
+const START_LEAD_MS = 2500;          // NEW track starts use countdown
+const PRELOAD_LEAD_MS = 2500;        // send preload hint before end
 
 let state = {
   playing: false,
   paused: false,
   trackId: null,
-  startTime: null,       // epoch ms (when current track is aligned to 0)
-  pausedAtMs: 0,         // elapsed ms into track at pause
-  playlist: ["tyh"],     // default
+  startTime: null,      // epoch ms where track position=0
+  pausedAtMs: 0,        // elapsed ms when paused
+  playlist: ["tyh"],
   playlistIndex: 0
 };
 
@@ -48,8 +48,8 @@ function send(ws, obj) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 function broadcast(group, obj) {
-  const data = JSON.stringify(obj);
-  for (const ws of group) if (ws.readyState === WebSocket.OPEN) ws.send(data);
+  const msg = JSON.stringify(obj);
+  for (const ws of group) if (ws.readyState === WebSocket.OPEN) ws.send(msg);
 }
 function broadcastState() {
   broadcast(clients, { type: "state", state });
@@ -58,6 +58,7 @@ function broadcastState() {
 function broadcastClientsList() {
   broadcast(admins, { type: "clients", list: [...clientNames.values()] });
 }
+
 function clearTimers() {
   if (nextTimer) clearTimeout(nextTimer);
   if (preloadTimer) clearTimeout(preloadTimer);
@@ -71,32 +72,6 @@ function currentElapsedMs() {
   return Math.max(0, Date.now() - state.startTime);
 }
 
-function scheduleAutoAdvance() {
-  clearTimers();
-  if (!state.playing || state.paused || !state.trackId) return;
-
-  const t = TRACKS[state.trackId];
-  if (!t || !t.duration) return;
-
-  const elapsed = currentElapsedMs();
-  const remaining = Math.max(0, t.duration - elapsed);
-
-  // notify clients to preload next track a little before the end
-  const nextId = getNextTrackId();
-  if (nextId) {
-    const preloadIn = Math.max(0, remaining - NEXT_PRELOAD_LEAD_MS);
-    preloadTimer = setTimeout(() => {
-      broadcast(clients, { type: "preload", trackId: nextId });
-      broadcast(admins, { type: "preload", trackId: nextId });
-    }, preloadIn);
-  }
-
-  nextTimer = setTimeout(() => {
-    // end reached -> advance
-    advanceToNextTrack();
-  }, remaining);
-}
-
 function getNextTrackId() {
   const list = state.playlist || [];
   if (!list.length) return null;
@@ -106,6 +81,31 @@ function getNextTrackId() {
   return list[nextI];
 }
 
+function scheduleAutoAdvance() {
+  clearTimers();
+  if (!state.playing || state.paused || !state.trackId) return;
+
+  const t = TRACKS[state.trackId];
+  if (!t?.duration) return;
+
+  const elapsed = currentElapsedMs();
+  const remaining = Math.max(0, t.duration - elapsed);
+
+  // preload hint shortly before end
+  const nextId = getNextTrackId();
+  if (nextId) {
+    const inMs = Math.max(0, remaining - PRELOAD_LEAD_MS);
+    preloadTimer = setTimeout(() => {
+      broadcast(clients, { type: "preload", trackId: nextId });
+      broadcast(admins, { type: "preload", trackId: nextId });
+    }, inMs);
+  }
+
+  nextTimer = setTimeout(() => {
+    advanceToNextTrack();
+  }, remaining);
+}
+
 function startTrack(trackId) {
   if (!TRACKS[trackId]) return;
 
@@ -113,16 +113,15 @@ function startTrack(trackId) {
   state.playing = true;
   state.paused = false;
   state.trackId = trackId;
-  state.startTime = Date.now() + START_LEAD_MS;
   state.pausedAtMs = 0;
 
-  // broadcast start with fixed startTime
+  // NEW starts: countdown lead-in
+  state.startTime = Date.now() + START_LEAD_MS;
+
   broadcast(clients, { type: "play", trackId, startTime: state.startTime });
   broadcast(admins, { type: "play", trackId, startTime: state.startTime });
   broadcastState();
 
-  // schedule next based on duration once we actually start (use the same clock)
-  // (we can schedule immediately; it’s relative)
   scheduleAutoAdvance();
 }
 
@@ -140,21 +139,22 @@ function stopAll() {
 }
 
 function pauseAll() {
-  if (!state.playing || state.paused || !state.trackId) return;
+  if (!state.playing || state.paused || !state.trackId || !state.startTime) return;
 
   clearTimers();
   state.paused = true;
   state.pausedAtMs = currentElapsedMs();
 
-  broadcast(clients, { type: "pause", trackId: state.trackId, pausedAtMs: state.pausedAtMs });
-  broadcast(admins, { type: "pause", trackId: state.trackId, pausedAtMs: state.pausedAtMs });
+  broadcast(clients, { type: "pause", pausedAtMs: state.pausedAtMs });
+  broadcast(admins, { type: "pause", pausedAtMs: state.pausedAtMs });
   broadcastState();
 }
 
+// ✅ Resume continues (does NOT restart), instant
 function resumeAll() {
   if (!state.playing || !state.paused || !state.trackId) return;
 
-  // ✅ instant resume: startTime set so "now" equals paused position
+  // startTime such that "now" corresponds to paused position
   state.startTime = Date.now() - state.pausedAtMs;
   state.paused = false;
 
@@ -164,7 +164,6 @@ function resumeAll() {
 
   scheduleAutoAdvance();
 }
-
 
 function advanceToNextTrack() {
   const list = state.playlist || [];
@@ -195,7 +194,7 @@ wss.on("connection", (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // time sync (preset clock)
+    // time sync for accurate clock offset
     if (msg.type === "timeSync") {
       send(ws, { type: "timeSync", clientSend: msg.clientSend, serverTime: Date.now() });
       return;
@@ -204,21 +203,12 @@ wss.on("connection", (ws) => {
     if (msg.type === "hello") {
       ws.role = msg.role;
 
-      if (ws.role === "client") {
-        clients.add(ws);
-        send(ws, { type: "tracks", tracks: TRACKS });
-        send(ws, { type: "state", state });
-        broadcastClientsList();
-        return;
-      }
+      if (ws.role === "client") clients.add(ws);
+      if (ws.role === "admin") admins.add(ws);
 
-      if (ws.role === "admin") {
-        admins.add(ws);
-        send(ws, { type: "tracks", tracks: TRACKS });
-        send(ws, { type: "state", state });
-        broadcastClientsList();
-        return;
-      }
+      send(ws, { type: "tracks", tracks: TRACKS });
+      send(ws, { type: "state", state });
+      broadcastClientsList();
       return;
     }
 
@@ -231,29 +221,8 @@ wss.on("connection", (ws) => {
 
     if (ws.role !== "admin") return;
 
-    // playlist updates from admin
-    if (msg.type === "setPlaylist") {
-      const pl = Array.isArray(msg.playlist) ? msg.playlist.filter(id => TRACKS[id]) : [];
-      state.playlist = pl.length ? pl : ["tyh"];
-      // keep index sane
-      state.playlistIndex = Math.min(state.playlistIndex ?? 0, state.playlist.length - 1);
-      broadcastState();
-      return;
-    }
-
-    if (msg.type === "playAtIndex") {
-      const idx = Number(msg.index);
-      if (!Number.isFinite(idx)) return;
-      if (!state.playlist || !state.playlist.length) return;
-      const clamped = Math.max(0, Math.min(idx, state.playlist.length - 1));
-      state.playlistIndex = clamped;
-      startTrack(state.playlist[clamped]);
-      return;
-    }
-
     if (msg.type === "stop") return stopAll();
 
-    // pause/play toggle = pause everyone OR resume everyone with new startTime (resync)
     if (msg.type === "togglePause") {
       if (!state.playing) return;
       if (!state.paused) return pauseAll();
@@ -263,16 +232,32 @@ wss.on("connection", (ws) => {
     if (msg.type === "next") return advanceToNextTrack();
     if (msg.type === "back") return goBackTrack();
 
-    // play selected track immediately (sets playlistIndex to that track if present)
     if (msg.type === "playTrack") {
-      const trackId = msg.trackId;
-      if (!TRACKS[trackId]) return;
+      const id = msg.trackId;
+      if (!TRACKS[id]) return;
 
-      const idx = (state.playlist || []).indexOf(trackId);
+      const idx = (state.playlist || []).indexOf(id);
       if (idx >= 0) state.playlistIndex = idx;
 
-      startTrack(trackId);
+      return startTrack(id);
+    }
+
+    if (msg.type === "setPlaylist") {
+      const pl = Array.isArray(msg.playlist) ? msg.playlist.filter(id => TRACKS[id]) : [];
+      state.playlist = pl.length ? pl : ["tyh"];
+      state.playlistIndex = Math.min(state.playlistIndex ?? 0, state.playlist.length - 1);
+      broadcastState();
       return;
+    }
+
+    if (msg.type === "playAtIndex") {
+      const idx = Number(msg.index);
+      if (!Number.isFinite(idx)) return;
+      if (!state.playlist?.length) return;
+
+      const clamped = Math.max(0, Math.min(idx, state.playlist.length - 1));
+      state.playlistIndex = clamped;
+      return startTrack(state.playlist[clamped]);
     }
   });
 

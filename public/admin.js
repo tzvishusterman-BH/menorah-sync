@@ -1,34 +1,36 @@
-// ===== PIN gate =====
+// ===== PIN gate (NOT saved) =====
 const PIN_CODE = "130865";
 const gate = document.getElementById("pinGate");
 const pinInput = document.getElementById("pinInput");
 const pinBtn = document.getElementById("pinBtn");
 const pinMsg = document.getElementById("pinMsg");
 
-function unlockIfSaved(){
-  if (localStorage.getItem("admin_unlocked") === "1") gate.style.display = "none";
-}
-unlockIfSaved();
-
 pinBtn.onclick = () => {
   if (pinInput.value.trim() === PIN_CODE) {
-    localStorage.setItem("admin_unlocked", "1");
     gate.style.display = "none";
   } else {
     pinMsg.style.display = "block";
-    setTimeout(() => pinMsg.style.display = "none", 1200);
+    setTimeout(() => (pinMsg.style.display = "none"), 1200);
   }
 };
 
 // ===== WebSocket + state =====
 let ws;
 let tracks = {};
-let state = { playing:false, paused:false, trackId:null, startTime:null, playlist:[], playlistIndex:0 };
+let state = {
+  playing: false,
+  paused: false,
+  trackId: null,
+  startTime: null,
+  playlist: ["tyh"],
+  playlistIndex: 0
+};
 
 const trackSelect = document.getElementById("trackSelect");
 const nowPlayingEl = document.getElementById("nowPlaying");
 const clockEl = document.getElementById("clock");
 const countdownEl = document.getElementById("countdown");
+
 const pausePlayBtn = document.getElementById("pausePlayBtn");
 const stopBtn = document.getElementById("stopBtn");
 const nextBtn = document.getElementById("nextBtn");
@@ -84,7 +86,6 @@ function renderTop(){
 
   pausePlayBtn.textContent = "PAUSE";
 }
-
 setInterval(renderTop, 100);
 
 function renderTrackDropdown(){
@@ -127,7 +128,7 @@ function renderPlaylist(){
     delBtn.textContent = "✕";
     delBtn.className = "gray";
     delBtn.onclick = () => {
-      const next = pl.slice(0, idx).concat(pl.slice(idx+1));
+      const next = pl.slice(0, idx).concat(pl.slice(idx + 1));
       ws.send(JSON.stringify({ type:"setPlaylist", playlist: next }));
     };
 
@@ -141,7 +142,6 @@ function renderPlaylist(){
   });
 }
 
-// Drag & drop reorder
 new Sortable(playlistEl, {
   handle: ".handle",
   animation: 150,
@@ -162,10 +162,7 @@ playSelectedBtn.onclick = () => {
   ws.send(JSON.stringify({ type:"playTrack", trackId: trackSelect.value }));
 };
 
-pausePlayBtn.onclick = () => {
-  ws.send(JSON.stringify({ type:"togglePause" }));
-};
-
+pausePlayBtn.onclick = () => ws.send(JSON.stringify({ type:"togglePause" }));
 stopBtn.onclick = () => ws.send(JSON.stringify({ type:"stop" }));
 nextBtn.onclick = () => ws.send(JSON.stringify({ type:"next" }));
 backBtn.onclick = () => ws.send(JSON.stringify({ type:"back" }));
@@ -220,6 +217,4 @@ ws.onmessage = (e) => {
     renderClients(msg.list || []);
     return;
   }
-
-  // preload notice is optional (we don't need to do anything on admin)
 };
