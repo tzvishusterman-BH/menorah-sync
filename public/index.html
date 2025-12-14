@@ -4,44 +4,144 @@
 <meta charset="UTF-8">
 <title>Berlin Menorah Parade 5786</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+
 <style>
-body {
-  margin:0;
-  font-family: Arial, sans-serif;
-  color:white;
-  background:url("Parade Flyer Berlin 86.jpg") center/cover no-repeat fixed;
-}
-.overlay {
-  background:rgba(0,0,0,0.7);
-  min-height:100vh;
-  padding:20px;
-}
-button,input,select {
-  padding:12px;
-  font-size:16px;
-}
+  body{
+    margin:0;
+    font-family: Arial, sans-serif;
+    color:#fff;
+    background:url("Parade Flyer Berlin 86.jpg") center/cover no-repeat fixed;
+  }
+  .overlay{
+    min-height:100vh;
+    background:rgba(0,0,0,0.78);
+    padding:18px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:14px;
+    text-align:center;
+  }
+  h1{
+    margin:10px 0 0;
+    color:#1db954;
+    font-size:34px;
+    font-weight:900;
+  }
+  .card{
+    width:min(520px, 92vw);
+    background:rgba(10,10,10,0.72);
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:16px;
+    padding:16px;
+    backdrop-filter: blur(6px);
+  }
+  .row{
+    display:flex;
+    gap:10px;
+    justify-content:center;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  select,input,button{
+    padding:12px;
+    border-radius:12px;
+    border:0;
+    font-size:16px;
+    font-weight:800;
+  }
+  select{
+    background:#1db954;
+    color:#000;
+  }
+  input{
+    width:min(420px, 80vw);
+    background:#111;
+    color:#fff;
+    border:1px solid rgba(255,255,255,0.18);
+  }
+  button{
+    cursor:pointer;
+    background:#1db954;
+    color:#000;
+    min-width:160px;
+  }
+  button:disabled{
+    opacity:0.45;
+    cursor:not-allowed;
+  }
+  .statusWrap{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    align-items:center;
+    margin-top:10px;
+    flex-wrap:wrap;
+  }
+  .pill{
+    padding:8px 12px;
+    border-radius:999px;
+    background:rgba(255,255,255,0.10);
+    border:1px solid rgba(255,255,255,0.14);
+    font-weight:900;
+  }
+  .pill.good{ border-color: rgba(29,185,84,0.6); }
+  .pill.bad{ border-color: rgba(255,90,90,0.65); }
+  .hint{
+    color:rgba(255,255,255,0.80);
+    font-size:14px;
+    line-height:1.35;
+    margin-top:8px;
+  }
+  .tiny{
+    color:rgba(255,255,255,0.72);
+    font-size:13px;
+  }
 </style>
 </head>
+
 <body>
 <div class="overlay">
-  <h1 data-i18n="title">Berlin Menorah Parade 5786</h1>
 
-  <select id="langSelect">
-    <option value="en">EN</option>
-    <option value="he">HE</option>
-    <option value="ru">RU</option>
-    <option value="de">DE</option>
-  </select>
+  <div class="row" style="width:100%; justify-content:flex-end;">
+    <select id="langSelect" title="Language">
+      <option value="en">EN</option>
+      <option value="he">HE</option>
+      <option value="ru">RU</option>
+      <option value="de">DE</option>
+    </select>
+  </div>
 
-  <p data-i18n="family">Family Name</p>
-  <input id="familyName">
+  <h1>Berlin Menorah Parade 5786</h1>
 
-  <button id="armBtn" data-i18n="arm">ARM AUDIO</button>
+  <div class="card">
+    <div style="font-weight:900; font-size:18px; margin-bottom:10px;">
+      Family name (required to arm)
+    </div>
 
-  <p id="status">Not synced</p>
+    <input id="familyName" autocomplete="family-name" placeholder="">
+
+    <div class="row" style="margin-top:12px;">
+      <button id="armBtn" disabled>ARM AUDIO</button>
+      <button id="pauseBtn" style="display:none;">PAUSE</button>
+    </div>
+
+    <div class="statusWrap">
+      <div id="statusPill" class="pill bad">Status: Not Armed</div>
+      <div id="nowPlayingPill" class="pill">Now Playing: —</div>
+    </div>
+
+    <div class="hint">
+      If the audio ever feels out of sync, <b>refresh the page</b> to re-sync with everyone.
+    </div>
+
+    <div class="tiny" style="margin-top:10px;">
+      Tip: Keep your screen on during the parade for best reliability.
+    </div>
+  </div>
+
 </div>
 
-<script src="translations.js"></script>
 <script src="client.js"></script>
 </body>
 </html>
