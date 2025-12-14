@@ -7,16 +7,18 @@
 <style>
   body{margin:0;padding:18px;font-family:Arial,sans-serif;background:#0d0d0d;color:#fff;}
   h1{margin:0 0 14px;color:#4da3ff;font-weight:900;}
-  .card{background:#181818;border:1px solid #2a2a2a;border-radius:14px;padding:14px;max-width:720px;}
+  .card{background:#181818;border:1px solid #2a2a2a;border-radius:14px;padding:14px;max-width:820px;}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
   select,button{padding:12px;border-radius:10px;border:0;font-weight:900;font-size:16px;}
   select{background:#222;color:#fff;min-width:260px;}
   button{cursor:pointer;}
   .blue{background:#4da3ff;color:#001226;}
   .red{background:#ff4444;color:#fff;}
+  .pill{display:inline-block;padding:8px 12px;border-radius:999px;background:#111;border:1px solid #2a2a2a;font-weight:900;}
   #nowPlaying{margin-top:12px;font-size:18px;font-weight:900;}
-  #clock{margin-top:10px;font-size:48px;font-weight:900;letter-spacing:1px;}
+  #clock{margin-top:10px;font-size:46px;font-weight:900;letter-spacing:1px;}
   #countdown{margin-top:6px;font-size:22px;font-weight:900;color:rgba(255,255,255,0.85);}
+  ul{margin:10px 0 0;padding-left:18px;}
 </style>
 </head>
 <body>
@@ -26,12 +28,21 @@
     <div class="row">
       <select id="trackSelect"><option>Loading tracks…</option></select>
       <button id="playBtn" class="blue">PLAY (3s countdown)</button>
+      <button id="resyncBtn" class="blue">RESYNC ALL</button>
       <button id="stopBtn" class="red">STOP</button>
     </div>
 
     <div id="nowPlaying">Now Playing: —</div>
     <div id="clock">--:--:--</div>
     <div id="countdown">Countdown: —</div>
+
+    <div style="height:14px;"></div>
+
+    <div class="row">
+      <span class="pill" id="carsCount">Cars: 0</span>
+    </div>
+
+    <ul id="clients"></ul>
   </div>
 
   <script src="admin.js"></script>

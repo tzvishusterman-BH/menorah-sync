@@ -3,9 +3,11 @@ let tracks = {};
 let state = { playing:false, trackId:null, startTime:null };
 
 const trackSelect = document.getElementById("trackSelect");
-const nowPlaying = document.getElementById("nowPlaying");
+const nowPlayingEl = document.getElementById("nowPlaying");
 const clockEl = document.getElementById("clock");
 const countdownEl = document.getElementById("countdown");
+const clientsEl = document.getElementById("clients");
+const carsCountEl = document.getElementById("carsCount");
 
 let serverOffsetMs = 0;
 let bestRttMs = Infinity;
@@ -26,23 +28,29 @@ function fmtTime(ms){
   return `${hh}:${mm}:${ss}`;
 }
 
-function render(){
-  clockEl.textContent = fmtTime(correctedNowMs());
+function renderNowPlaying(){
+  if (!state.playing || !state.trackId) {
+    nowPlayingEl.textContent = "Now Playing: —";
+    countdownEl.textContent = "Countdown: —";
+    return;
+  }
+  nowPlayingEl.textContent = "Now Playing: " + (tracks[state.trackId]?.name || state.trackId);
+}
 
+function renderCountdown(){
   if (!state.playing || !state.trackId || !state.startTime) {
     countdownEl.textContent = "Countdown: —";
     return;
   }
-
   const leftMs = state.startTime - correctedNowMs();
-  if (leftMs > 0) {
-    countdownEl.textContent = `Countdown: ${(leftMs/1000).toFixed(1)}s`;
-  } else {
-    countdownEl.textContent = "Countdown: LIVE";
-  }
+  if (leftMs > 0) countdownEl.textContent = `Countdown: ${(leftMs/1000).toFixed(1)}s`;
+  else countdownEl.textContent = "Countdown: LIVE";
 }
 
-setInterval(render, 100);
+setInterval(() => {
+  clockEl.textContent = fmtTime(correctedNowMs());
+  renderCountdown();
+}, 100);
 
 ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
@@ -75,21 +83,21 @@ ws.onmessage = (e) => {
       o.textContent = t.name;
       trackSelect.appendChild(o);
     });
+    renderNowPlaying();
     return;
   }
 
   if (msg.type === "state") {
     state = msg.state || state;
-    if (!state.playing) nowPlaying.textContent = "Now Playing: —";
-    else nowPlaying.textContent = "Now Playing: " + (tracks[state.trackId]?.name || state.trackId);
+    renderNowPlaying();
     return;
   }
 
-  if (msg.type === "play") {
+  if (msg.type === "play" || msg.type === "resync") {
     state.playing = true;
     state.trackId = msg.trackId;
     state.startTime = msg.startTime;
-    nowPlaying.textContent = "Now Playing: " + (tracks[msg.trackId]?.name || msg.trackId);
+    renderNowPlaying();
     return;
   }
 
@@ -97,12 +105,29 @@ ws.onmessage = (e) => {
     state.playing = false;
     state.trackId = null;
     state.startTime = null;
-    nowPlaying.textContent = "Now Playing: —";
+    renderNowPlaying();
+    return;
+  }
+
+  if (msg.type === "clients") {
+    const list = msg.list || [];
+    carsCountEl.textContent = `Cars: ${list.length}`;
+    clientsEl.innerHTML = "";
+    list.forEach(n => {
+      const li = document.createElement("li");
+      li.textContent = n;
+      clientsEl.appendChild(li);
+    });
+    return;
   }
 };
 
 document.getElementById("playBtn").onclick = () => {
   ws.send(JSON.stringify({ type:"play", trackId: trackSelect.value }));
+};
+
+document.getElementById("resyncBtn").onclick = () => {
+  ws.send(JSON.stringify({ type:"resync" }));
 };
 
 document.getElementById("stopBtn").onclick = () => {

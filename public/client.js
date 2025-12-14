@@ -1,7 +1,5 @@
 let ws;
 let tracks = {};
-let armed = false;
-
 let state = { playing:false, trackId:null, startTime:null };
 
 const audio = document.getElementById("iosPlayer");
@@ -11,42 +9,35 @@ const familyInput = document.getElementById("familyName");
 const statusPill = document.getElementById("statusPill");
 const nowPlayingPill = document.getElementById("nowPlayingPill");
 
-// ----- server clock (preset clock) -----
+let armed = false;
+let locallyPaused = false;
+
 let serverOffsetMs = 0;
 let bestRttMs = Infinity;
+
+let currentTrackId = null;
+let scheduledTimer = null;
+
+function setStatus(t, good=false){
+  statusPill.textContent = "Status: " + t;
+  statusPill.classList.remove("good","bad");
+  statusPill.classList.add(good ? "good" : "bad");
+}
+function setNowPlaying(t){
+  nowPlayingPill.textContent = "Now Playing: " + t;
+}
 
 function correctedNowMs(){ return Date.now() + serverOffsetMs; }
 function expectedOffsetSec(startTimeMs){
   return Math.max(0, (correctedNowMs() - startTimeMs) / 1000);
 }
 
-function timeSyncOnce(){
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type:"timeSync", clientSend: Date.now() }));
-  }
-}
-
-// ----- UI helpers -----
-function setStatus(t){ statusPill.textContent = "Status: " + t; }
-function setNowPlaying(t){ nowPlayingPill.textContent = "Now Playing: " + t; }
-
-// ----- local flags -----
-let locallyPaused = false;
-let currentTrackId = null;   // what we currently have loaded
-let scheduledTimer = null;   // for countdown starts
-
 function clearSchedule(){
   if (scheduledTimer) clearTimeout(scheduledTimer);
   scheduledTimer = null;
 }
 
-function stopEverything(){
-  clearSchedule();
-  try { audio.pause(); } catch {}
-  // do NOT always clear src here; only when changing tracks or stopping broadcast
-}
-
-function hardStopAndUnload(){
+function hardStopUnload(){
   clearSchedule();
   try { audio.pause(); } catch {}
   audio.removeAttribute("src");
@@ -54,136 +45,148 @@ function hardStopAndUnload(){
   currentTrackId = null;
 }
 
+function stopButKeepSrc(){
+  clearSchedule();
+  try { audio.pause(); } catch {}
+}
+
 function ensureTrackLoaded(trackId){
   const t = tracks[trackId];
   if (!t) return false;
 
-  // If already loaded, do nothing
   if (currentTrackId === trackId && audio.src && audio.src.includes(encodeURI(t.file))) {
     return true;
   }
 
-  // Load fresh track
-  stopEverything();
+  stopButKeepSrc();
   audio.src = t.file;
   audio.load();
   currentTrackId = trackId;
   return true;
 }
 
-// Core: “join the parade NOW” (or schedule if start is in future)
-async function syncPlayNow(trackId, startTimeMs){
+async function timeSyncOnce(){
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type:"timeSync", clientSend: Date.now() }));
+  }
+}
+
+// Start/sync playback to the parade position
+async function syncToParade(trackId, startTimeMs){
   if (!armed) return;
   if (!trackId || !startTimeMs) return;
-
   const t = tracks[trackId];
   if (!t) return;
 
   setNowPlaying(t.name);
 
-  // If locally paused, we only resync when they press PLAY (below)
+  // If user paused locally, don’t force audio; just show status
   if (locallyPaused) {
-    setStatus("Paused (tap Play to re-sync)");
+    setStatus("Paused (tap PLAY to re-sync)", false);
     return;
   }
 
-  // load track if needed
   ensureTrackLoaded(trackId);
 
   const delayMs = Math.round(startTimeMs - correctedNowMs());
 
+  // Countdown start (future)
   if (delayMs > 0) {
-    // Countdown start in the future
-    setStatus(`Synced (starting in ${(delayMs/1000).toFixed(1)}s)`);
-    stopEverything();
+    stopButKeepSrc();
     clearSchedule();
+    setStatus(`Synced (starting in ${(delayMs/1000).toFixed(1)}s)`, true);
 
     scheduledTimer = setTimeout(async () => {
       if (!armed || locallyPaused) return;
       try {
         audio.currentTime = 0;
         await audio.play();
-        setStatus("Playing (Synced)");
+        setStatus("Playing (Synced)", true);
       } catch {
-        setStatus("Tap Play (audio blocked)");
+        setStatus("Tap PLAY (audio blocked)", false);
       }
     }, delayMs);
 
     return;
   }
 
-  // Already started: jump into correct position
+  // Already started: seek into correct position
   const shouldBe = expectedOffsetSec(startTimeMs);
 
   try {
-    // If we are already playing, only correct if drift is large
-    const isPlaying = !audio.paused;
+    const playing = !audio.paused;
     const actual = audio.currentTime || 0;
     const drift = Math.abs(actual - shouldBe);
 
-    if (!isPlaying) {
+    // If not playing, start at correct point
+    if (!playing) {
       audio.currentTime = shouldBe;
       await audio.play();
-      setStatus("Playing (Synced)");
+      setStatus("Playing (Synced)", true);
       return;
     }
 
-    // While playing: snap back only if needed
+    // If playing but drift large, snap back
     if (drift > 0.35) {
-      // iOS is happier if we pause before seeking
       audio.pause();
       audio.currentTime = shouldBe;
       await audio.play();
-      setStatus("Playing (Resynced)");
+      setStatus("Playing (Resynced)", true);
     } else {
-      setStatus("Playing (Synced)");
+      setStatus("Playing (Synced)", true);
     }
   } catch {
-    setStatus("Tap Play (audio blocked)");
+    setStatus("Tap PLAY (audio blocked)", false);
   }
 }
 
-// Drift correction loop (this is what makes sync “way better”)
+// Drift correction loop (keeps “last week” tightness)
 setInterval(async () => {
   if (!armed) return;
   if (locallyPaused) return;
   if (!state.playing || !state.trackId || !state.startTime) return;
-
-  // if not loaded right track yet, try
   if (!ensureTrackLoaded(state.trackId)) return;
-
-  // Only correct if audio is actually playing
   if (audio.paused) return;
 
   const shouldBe = expectedOffsetSec(state.startTime);
   const actual = audio.currentTime || 0;
   const drift = actual - shouldBe;
 
-  // If drift is more than 450ms, resync gently
   if (Math.abs(drift) > 0.45) {
     try {
       audio.pause();
       audio.currentTime = shouldBe;
       await audio.play();
-      setStatus("Playing (Resynced)");
+      setStatus("Playing (Resynced)", true);
     } catch {}
   }
 }, 1200);
 
-// ----- ARM -----
+// ARM
 armBtn.onclick = async () => {
   const name = familyInput.value.trim();
-  if (!name) { alert("Enter family name first"); return; }
+  if (!name) {
+    alert("Please enter your family name first.");
+    familyInput.focus();
+    return;
+  }
+
+  // register name (for admin list)
+  try {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type:"register", name }));
+    }
+  } catch {}
 
   armed = true;
   locallyPaused = false;
-
   armBtn.style.display = "none";
   pauseBtn.style.display = "inline-block";
   pauseBtn.textContent = "PAUSE";
-  setStatus("Armed");
 
-  // iOS unlock trick (chime.mp3)
+  setStatus("Armed", false);
+
+  // iOS unlock trick (uses your chime.mp3 if present; safe if missing)
   try {
     audio.src = "chime.mp3";
     audio.currentTime = 0;
@@ -193,18 +196,16 @@ armBtn.onclick = async () => {
     audio.load();
   } catch {}
 
-  // Start clock sync
-  timeSyncOnce();
+  // Kick time sync once
+  await timeSyncOnce();
 
-  // If parade already playing, join immediately
+  // Late join guarantee: if something is playing, sync immediately
   if (state.playing && state.trackId && state.startTime) {
-    await syncPlayNow(state.trackId, state.startTime);
+    await syncToParade(state.trackId, state.startTime);
   }
 };
 
-// ----- Pause/Play button behavior (THIS is your question) -----
-// Pause: local pause
-// Play: NOT resume. It *rejoins* the parade at correct timestamp.
+// Pause/Play button: PLAY = REJOIN PARADE (not local resume)
 pauseBtn.onclick = async () => {
   if (!armed) return;
 
@@ -213,22 +214,21 @@ pauseBtn.onclick = async () => {
     clearSchedule();
     try { audio.pause(); } catch {}
     pauseBtn.textContent = "PLAY";
-    setStatus("Paused (tap Play to re-sync)");
+    setStatus("Paused (tap PLAY to re-sync)", false);
     return;
   }
 
-  // PLAY (re-sync)
   locallyPaused = false;
   pauseBtn.textContent = "PAUSE";
 
   if (state.playing && state.trackId && state.startTime) {
-    await syncPlayNow(state.trackId, state.startTime);
+    await syncToParade(state.trackId, state.startTime);
   } else {
-    setStatus("Armed (waiting…)");
+    setStatus("Armed (waiting…)", false);
   }
 };
 
-// ----- WebSocket -----
+// WebSocket
 ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
 ws.onopen = () => {
@@ -261,30 +261,32 @@ ws.onmessage = async (e) => {
 
     if (!state.playing) {
       setNowPlaying("—");
-      setStatus(armed ? (locallyPaused ? "Paused" : "Armed") : "Not Armed");
-      hardStopAndUnload();
+      setStatus(armed ? (locallyPaused ? "Paused" : "Armed") : "Not Armed", false);
+      hardStopUnload();
       return;
     }
 
-    // if armed and not locally paused, keep synced
-    if (armed) {
-      await syncPlayNow(state.trackId, state.startTime);
-    } else {
-      setStatus("Broadcast running — ARM to join");
+    // Broadcast running
+    if (!armed) {
+      setStatus("Broadcast running — ARM to join", false);
+      return;
     }
+
+    await syncToParade(state.trackId, state.startTime);
     return;
   }
 
-  if (msg.type === "play") {
+  if (msg.type === "play" || msg.type === "resync") {
     state.playing = true;
     state.trackId = msg.trackId;
     state.startTime = msg.startTime;
 
-    if (armed) {
-      await syncPlayNow(msg.trackId, msg.startTime);
-    } else {
-      setStatus("Broadcast running — ARM to join");
+    if (!armed) {
+      setStatus("Broadcast running — ARM to join", false);
+      return;
     }
+
+    await syncToParade(msg.trackId, msg.startTime);
     return;
   }
 
@@ -292,12 +294,12 @@ ws.onmessage = async (e) => {
     state.playing = false;
     state.trackId = null;
     state.startTime = null;
-    hardStopAndUnload();
+    hardStopUnload();
     setNowPlaying("—");
-    setStatus(armed ? (locallyPaused ? "Paused" : "Armed") : "Not Armed");
+    setStatus(armed ? (locallyPaused ? "Paused" : "Armed") : "Not Armed", false);
     return;
   }
 };
 
-setStatus("Not Armed");
+setStatus("Not Armed", false);
 setNowPlaying("—");

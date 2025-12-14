@@ -4,23 +4,19 @@
 <meta charset="UTF-8">
 <title>Berlin Menorah Parade 5786</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
 <style>
   :root{
     --accent:#4da3ff;
-    --accent2:#2b7dff;
     --card: rgba(8, 16, 30, 0.72);
     --border: rgba(255,255,255,0.14);
     --textSoft: rgba(255,255,255,0.82);
   }
-
   body{
     margin:0;
     font-family: Arial, sans-serif;
     color:#fff;
     background:url("flyer.jpg") center/cover no-repeat fixed;
   }
-
   .overlay{
     min-height:100vh;
     background:rgba(0,0,0,0.62);
@@ -31,7 +27,6 @@
     gap:14px;
     text-align:center;
   }
-
   h1{
     margin:10px 0 0;
     color:var(--accent);
@@ -39,7 +34,6 @@
     font-weight:900;
     text-shadow: 0 2px 14px rgba(77,163,255,0.25);
   }
-
   .card{
     width:min(560px, 94vw);
     background:var(--card);
@@ -48,7 +42,6 @@
     padding:16px;
     backdrop-filter: blur(6px);
   }
-
   .row{
     display:flex;
     gap:10px;
@@ -56,7 +49,6 @@
     align-items:center;
     flex-wrap:wrap;
   }
-
   input,button{
     padding:12px;
     border-radius:12px;
@@ -64,14 +56,12 @@
     font-size:16px;
     font-weight:800;
   }
-
   input{
     width:min(440px, 84vw);
     background:rgba(0,0,0,0.45);
     color:#fff;
     border:1px solid rgba(255,255,255,0.18);
   }
-
   button{
     cursor:pointer;
     background:var(--accent);
@@ -79,8 +69,7 @@
     min-width:170px;
     box-shadow: 0 10px 28px rgba(77,163,255,0.14);
   }
-  button:hover{ background:var(--accent2); }
-
+  button:hover{ filter:brightness(1.05); }
   .statusWrap{
     display:flex;
     justify-content:space-between;
@@ -89,7 +78,6 @@
     margin-top:10px;
     flex-wrap:wrap;
   }
-
   .pill{
     padding:8px 12px;
     border-radius:999px;
@@ -106,7 +94,6 @@
     line-height:1.35;
     margin-top:8px;
   }
-
   .flyerFrame{
     width:min(560px, 94vw);
     border-radius:18px;
@@ -119,28 +106,11 @@
     height:auto;
     display:block;
   }
-
-  /* On-screen debug box */
-  #debugBox{
-    display:none;
-    width:min(560px, 94vw);
-    background:rgba(255,60,60,0.12);
-    border:1px solid rgba(255,60,60,0.35);
-    border-radius:14px;
-    padding:12px;
-    font-size:13px;
-    text-align:left;
-    white-space:pre-wrap;
-  }
 </style>
 </head>
-
 <body>
 <div class="overlay">
-
   <h1>Berlin Menorah Parade 5786</h1>
-
-  <div id="debugBox"></div>
 
   <div class="card">
     <div style="font-weight:900; font-size:18px; margin-bottom:10px;">
@@ -160,7 +130,7 @@
     </div>
 
     <div class="hint">
-      If the audio ever feels out of sync, <b>refresh the page</b> to re-sync with everyone.
+      If audio feels off, press <b>PLAY</b> again (it will re-sync to everyone).
     </div>
   </div>
 
@@ -168,7 +138,7 @@
     <img src="flyer.jpg" alt="Berlin Menorah Parade Flyer">
   </div>
 
-  <!-- iOS native audio element -->
+  <!-- Single audio element for ALL devices (iOS + Android + laptop) -->
   <audio id="iosPlayer" playsinline preload="auto" style="display:none;"></audio>
 
 </div>
