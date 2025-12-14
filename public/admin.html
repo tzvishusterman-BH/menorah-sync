@@ -4,88 +4,34 @@
 <meta charset="UTF-8">
 <title>Admin — Berlin Menorah Parade 5786</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
 <style>
-  body{
-    margin:0;
-    padding:18px;
-    font-family:Arial, sans-serif;
-    background:#0d0d0d;
-    color:#fff;
-  }
-  h1{
-    margin:0 0 14px;
-    color:#4da3ff;
-    font-weight:900;
-  }
-  .card{
-    background:#181818;
-    border:1px solid #2a2a2a;
-    border-radius:14px;
-    padding:14px;
-    max-width:620px;
-  }
-  .row{
-    display:flex;
-    gap:10px;
-    flex-wrap:wrap;
-    align-items:center;
-  }
-  select,button{
-    padding:12px;
-    border-radius:10px;
-    border:0;
-    font-weight:900;
-    font-size:16px;
-  }
-  select{
-    background:#222;
-    color:#fff;
-    min-width:260px;
-  }
-  button{
-    cursor:pointer;
-  }
-  .blue{
-    background:#4da3ff;
-    color:#001226;
-  }
-  .red{
-    background:#ff4444;
-    color:#fff;
-  }
-  #nowPlaying{
-    margin-top:12px;
-    font-size:18px;
-    font-weight:900;
-  }
-  .hint{
-    margin-top:10px;
-    color:rgba(255,255,255,0.75);
-    font-size:13px;
-    line-height:1.35;
-  }
+  body{margin:0;padding:18px;font-family:Arial,sans-serif;background:#0d0d0d;color:#fff;}
+  h1{margin:0 0 14px;color:#4da3ff;font-weight:900;}
+  .card{background:#181818;border:1px solid #2a2a2a;border-radius:14px;padding:14px;max-width:720px;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  select,button{padding:12px;border-radius:10px;border:0;font-weight:900;font-size:16px;}
+  select{background:#222;color:#fff;min-width:260px;}
+  button{cursor:pointer;}
+  .blue{background:#4da3ff;color:#001226;}
+  .red{background:#ff4444;color:#fff;}
+  #nowPlaying{margin-top:12px;font-size:18px;font-weight:900;}
+  #clock{margin-top:10px;font-size:48px;font-weight:900;letter-spacing:1px;}
+  #countdown{margin-top:6px;font-size:22px;font-weight:900;color:rgba(255,255,255,0.85);}
 </style>
 </head>
-
 <body>
   <h1>Admin — Berlin Menorah Parade 5786</h1>
 
   <div class="card">
     <div class="row">
-      <select id="trackSelect">
-        <option>Loading tracks…</option>
-      </select>
-
-      <button id="playBtn" class="blue">PLAY</button>
+      <select id="trackSelect"><option>Loading tracks…</option></select>
+      <button id="playBtn" class="blue">PLAY (3s countdown)</button>
       <button id="stopBtn" class="red">STOP</button>
     </div>
 
     <div id="nowPlaying">Now Playing: —</div>
-
-    <div class="hint">
-      This is the hard-reset admin: choose a track → PLAY sends the command to all clients.
-    </div>
+    <div id="clock">--:--:--</div>
+    <div id="countdown">Countdown: —</div>
   </div>
 
   <script src="admin.js"></script>

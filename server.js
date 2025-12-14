@@ -10,7 +10,7 @@ const wss = new WebSocket.Server({ server });
 app.use(express.static(path.join(__dirname, "public")));
 
 // ==========================
-// TRACK DEFINITIONS
+// TRACKS
 // ==========================
 const TRACKS = {
   tyh: { id: "tyh", name: "Thank You Hashem", file: "TYH.mp3" },
@@ -24,21 +24,27 @@ const TRACKS = {
   srulivnetanel: { id: "srulivnetanel", name: "Sruli & Netanel", file: "Sruli V'Netanel.mp3" }
 };
 
+const START_LEAD_MS = 3000; // countdown length
+
 let state = {
   playing: false,
-  trackId: null
+  trackId: null,
+  startTime: null // server epoch ms when track should start
 };
 
 const clients = new Set();
 const admins = new Set();
 
-function broadcast(targets, msg) {
-  const data = JSON.stringify(msg);
-  for (const ws of targets) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    }
-  }
+function send(ws, obj) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+function broadcast(group, obj) {
+  const data = JSON.stringify(obj);
+  for (const ws of group) if (ws.readyState === WebSocket.OPEN) ws.send(data);
+}
+function broadcastState() {
+  broadcast(clients, { type: "state", state });
+  broadcast(admins, { type: "state", state });
 }
 
 wss.on("connection", (ws) => {
@@ -48,35 +54,56 @@ wss.on("connection", (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
+    // preset clock sync (server time)
+    if (msg.type === "timeSync") {
+      send(ws, { type: "timeSync", clientSend: msg.clientSend, serverTime: Date.now() });
+      return;
+    }
+
     if (msg.type === "hello") {
       ws.role = msg.role;
+
       if (ws.role === "client") {
         clients.add(ws);
-        ws.send(JSON.stringify({ type: "tracks", tracks: TRACKS }));
-        ws.send(JSON.stringify({ type: "state", state }));
+        send(ws, { type: "tracks", tracks: TRACKS });
+        send(ws, { type: "state", state });
+        return;
       }
+
       if (ws.role === "admin") {
         admins.add(ws);
-        ws.send(JSON.stringify({ type: "tracks", tracks: TRACKS }));
-        ws.send(JSON.stringify({ type: "state", state }));
+        send(ws, { type: "tracks", tracks: TRACKS });
+        send(ws, { type: "state", state });
+        return;
       }
       return;
     }
 
-    if (ws.role === "admin") {
-      if (msg.type === "play") {
-        state.playing = true;
-        state.trackId = msg.trackId;
-        broadcast(clients, { type: "play", trackId: msg.trackId });
-        broadcast(admins, { type: "state", state });
-      }
+    if (ws.role !== "admin") return;
 
-      if (msg.type === "stop") {
-        state.playing = false;
-        state.trackId = null;
-        broadcast(clients, { type: "stop" });
-        broadcast(admins, { type: "state", state });
-      }
+    if (msg.type === "play") {
+      const trackId = msg.trackId;
+      if (!TRACKS[trackId]) return;
+
+      state.playing = true;
+      state.trackId = trackId;
+      state.startTime = Date.now() + START_LEAD_MS; // ✅ countdown / preset start
+
+      // broadcast play with the fixed startTime
+      broadcast(clients, { type: "play", trackId, startTime: state.startTime });
+      broadcast(admins, { type: "play", trackId, startTime: state.startTime });
+      broadcastState();
+      return;
+    }
+
+    if (msg.type === "stop") {
+      state.playing = false;
+      state.trackId = null;
+      state.startTime = null;
+      broadcast(clients, { type: "stop" });
+      broadcast(admins, { type: "stop" });
+      broadcastState();
+      return;
     }
   });
 
@@ -87,6 +114,4 @@ wss.on("connection", (ws) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log("Menorah Sync running on port", PORT);
-});
+server.listen(PORT, () => console.log("Menorah Sync running on port", PORT));
