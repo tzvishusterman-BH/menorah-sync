@@ -10,175 +10,36 @@ const wss = new WebSocket.Server({ server });
 app.use(express.static(path.join(__dirname, "public")));
 
 // ==========================
-// TRACK DEFINITIONS (ALL)
+// TRACK DEFINITIONS
 // ==========================
 const TRACKS = {
-  tyh: { id: "tyh", name: "Thank You Hashem", file: "TYH.mp3", duration: 532000 },
-  matisyahu: { id: "matisyahu", name: "Matisyahu", file: "Matisyahu.mp3", duration: 247000 },
-  yoniz: { id: "yoniz", name: "Yoni Z", file: "Yoni Z.mp3", duration: 151000 },
-  mendykraus: { id: "mendykraus", name: "Mendy Kraus", file: "Mendy Kraus.mp3", duration: 803000 },
-  meirshitrit: { id: "meirshitrit", name: "Meir Shitrit", file: "Meir Shitrit.mp3", duration: 2104000 },
-  menachemlifshitz: { id: "menachemlifshitz", name: "Menachem Lifshitz", file: "Menachem Lifshitz.mp3", duration: 1460000 },
-  chonimilecki: { id: "chonimilecki", name: "Choni Milecki", file: "Choni Milecki.mp3", duration: 1149000 },
-  djshatz: { id: "djshatz", name: "DJ Shatz", file: "DJ Shatz.mp3", duration: 802000 },
-  srulivnetanel: { id: "srulivnetanel", name: "Sruli & Netanel", file: "Sruli V'Netanel.mp3", duration: 206000 }
+  tyh: { id: "tyh", name: "Thank You Hashem", file: "TYH.mp3" },
+  matisyahu: { id: "matisyahu", name: "Matisyahu", file: "Matisyahu.mp3" },
+  yoniz: { id: "yoniz", name: "Yoni Z", file: "Yoni Z.mp3" },
+  mendykraus: { id: "mendykraus", name: "Mendy Kraus", file: "Mendy Kraus.mp3" },
+  meirshitrit: { id: "meirshitrit", name: "Meir Shitrit", file: "Meir Shitrit.mp3" },
+  menachemlifshitz: { id: "menachemlifshitz", name: "Menachem Lifshitz", file: "Menachem Lifshitz.mp3" },
+  chonimilecki: { id: "chonimilecki", name: "Choni Milecki", file: "Choni Milecki.mp3" },
+  djshatz: { id: "djshatz", name: "DJ Shatz", file: "DJ Shatz.mp3" },
+  srulivnetanel: { id: "srulivnetanel", name: "Sruli & Netanel", file: "Sruli V'Netanel.mp3" }
 };
 
-// Default playlist order (Option B)
-let playlist = [
-  "tyh",
-  "matisyahu",
-  "yoniz",
-  "mendykraus",
-  "meirshitrit",
-  "menachemlifshitz",
-  "chonimilecki",
-  "djshatz",
-  "srulivnetanel"
-];
-
-let currentIndex = -1;
-
-// Lead time (THIS is the big sync improvement)
-const START_LEAD_MS = 2500;
-
-// Broadcast state
 let state = {
   playing: false,
-  trackId: null,
-  startTime: null // server epoch ms when playback should begin
+  trackId: null
 };
 
-let nextTimer = null;
-
-// Connections
 const clients = new Set();
 const admins = new Set();
-const clientNames = new Map(); // ws -> string
 
-function send(ws, obj) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
-}
-
-function broadcast(set, obj) {
-  const msg = JSON.stringify(obj);
-  for (const ws of set) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-  }
-}
-
-function broadcastState() {
-  broadcast(admins, { type: "state", state });
-  broadcast(clients, { type: "state", state });
-}
-
-function broadcastClientsList() {
-  broadcast(admins, { type: "clients", list: [...clientNames.values()] });
-}
-
-function clearNextTimer() {
-  if (nextTimer) clearTimeout(nextTimer);
-  nextTimer = null;
-}
-
-function scheduleAutoNext(trackId) {
-  clearNextTimer();
-  const dur = TRACKS[trackId]?.duration;
-  if (!dur) return;
-
-  // Because we start in the future, next should be scheduled after lead + duration
-  nextTimer = setTimeout(() => {
-    playByIndex((currentIndex + 1) % playlist.length);
-  }, START_LEAD_MS + dur);
-}
-
-function playByIndex(index) {
-  if (!playlist.length) return;
-  if (index < 0) index = playlist.length - 1;
-  if (index >= playlist.length) index = 0;
-
-  const trackId = playlist[index];
-  if (!TRACKS[trackId]) return;
-
-  currentIndex = index;
-
-  state.playing = true;
-  state.trackId = trackId;
-
-  // ✅ Start in the future so everyone starts together
-  state.startTime = Date.now() + START_LEAD_MS;
-
-  // Tell clients to prepare + start at that exact server time
-  broadcast(clients, { type: "play", trackId, startTime: state.startTime });
-
-  // Update admins + clients
-  broadcastState();
-
-  // Auto-advance
-  scheduleAutoNext(trackId);
-}
-
-function startPlaylist() {
-  playByIndex(0);
-}
-
-function playTrack(trackId) {
-  const idx = playlist.indexOf(trackId);
-  if (idx === -1) return;
-  playByIndex(idx);
-}
-
-function skip() {
-  if (!playlist.length) return;
-  playByIndex((currentIndex + 1) % playlist.length);
-}
-
-function back() {
-  if (!playlist.length) return;
-
-  // Back Rule A: if >5s into the actual track time, restart same; else previous
-  if (state.playing && state.startTime) {
-    const msInto = Date.now() - state.startTime;
-    if (msInto > 5000) {
-      playByIndex(currentIndex);
-      return;
+function broadcast(targets, msg) {
+  const data = JSON.stringify(msg);
+  for (const ws of targets) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
     }
   }
-  playByIndex(currentIndex - 1);
 }
-
-function stop() {
-  clearNextTimer();
-  state.playing = false;
-  state.trackId = null;
-  state.startTime = null;
-
-  broadcast(clients, { type: "stop" });
-  broadcastState();
-}
-
-function resyncAll() {
-  if (!state.playing || !state.trackId || !state.startTime) return;
-
-  // How far into the track should we be right now?
-  const elapsedMs = Date.now() - state.startTime;
-  const elapsedClamped = Math.max(0, elapsedMs);
-
-  // New start time in the future (so everyone can line up)
-  const newStartTime = Date.now() + START_LEAD_MS - elapsedClamped;
-
-  // Update state and broadcast a resync
-  state.startTime = newStartTime;
-
-  broadcast(clients, {
-    type: "resync",
-    trackId: state.trackId,
-    startTime: state.startTime
-  });
-
-  broadcastState();
-}
-
 
 wss.on("connection", (ws) => {
   ws.role = null;
@@ -187,61 +48,45 @@ wss.on("connection", (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // --- TIME SYNC (optional but helpful) ---
-    if (msg.type === "timeSync") {
-      send(ws, { type: "timeSync", clientSend: msg.clientSend, serverTime: Date.now() });
-      return;
-    }
-
     if (msg.type === "hello") {
       ws.role = msg.role;
-
       if (ws.role === "client") {
         clients.add(ws);
-        send(ws, { type: "tracks", tracks: TRACKS });
-        send(ws, { type: "playlist", playlist });
-        send(ws, { type: "state", state });
-        broadcastClientsList();
-        return;
+        ws.send(JSON.stringify({ type: "tracks", tracks: TRACKS }));
+        ws.send(JSON.stringify({ type: "state", state }));
       }
-
       if (ws.role === "admin") {
         admins.add(ws);
-        send(ws, { type: "tracks", tracks: TRACKS });
-        send(ws, { type: "playlist", playlist });
-        send(ws, { type: "state", state });
-        broadcastClientsList();
-        return;
-      }
-    }
-
-    if (ws.role === "client") {
-      if (msg.type === "register") {
-        const name = String(msg.name || "").trim();
-        if (name) clientNames.set(ws, name);
-        broadcastClientsList();
+        ws.send(JSON.stringify({ type: "tracks", tracks: TRACKS }));
+        ws.send(JSON.stringify({ type: "state", state }));
       }
       return;
     }
 
     if (ws.role === "admin") {
-      if (msg.type === "startPlaylist") return startPlaylist();
-      if (msg.type === "playTrack" && TRACKS[msg.trackId]) return playTrack(msg.trackId);
-      if (msg.type === "skip") return skip();
-      if (msg.type === "back") return back();
-      if (msg.type === "stop") return stop();
+      if (msg.type === "play") {
+        state.playing = true;
+        state.trackId = msg.trackId;
+        broadcast(clients, { type: "play", trackId: msg.trackId });
+        broadcast(admins, { type: "state", state });
+      }
+
+      if (msg.type === "stop") {
+        state.playing = false;
+        state.trackId = null;
+        broadcast(clients, { type: "stop" });
+        broadcast(admins, { type: "state", state });
+      }
     }
   });
 
   ws.on("close", () => {
     clients.delete(ws);
     admins.delete(ws);
-    clientNames.delete(ws);
-    broadcastClientsList();
   });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, () => {
   console.log("Menorah Sync running on port", PORT);
 });
