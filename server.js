@@ -159,6 +159,16 @@ wss.on("connection", (ws) => {
   ws.on("message", (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+// --- TIME SYNC (for tighter audio sync) ---
+if (msg.type === "timeSync") {
+  // Echo back client's send time + server time
+  send(ws, {
+    type: "timeSync",
+    clientSend: msg.clientSend,
+    serverTime: Date.now()
+  });
+  return;
+}
 
     if (msg.type === "hello") {
       ws.role = msg.role;

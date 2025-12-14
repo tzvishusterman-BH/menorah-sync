@@ -23,10 +23,44 @@ let audioCtx = null;
 let source = null;
 let bufferCache = {};
 let currentlyPlayingTrackId = null;
-let currentlyPlayingStartTime = null;
+let currentlyPlayingStartTime = null; // server startTime ms
 let startedAtAudioCtxTime = null;
 let startedAtTrackOffsetSec = 0;
 
+// ==========================
+// CLOCK SYNC (IMPORTANT)
+// ==========================
+// serverOffsetMs = (serverTime - localTime) estimate
+let serverOffsetMs = 0;
+let bestRttMs = Infinity;
+let timeSyncInterval = null;
+
+function correctedNowMs() {
+  // Our best estimate of server time on this device
+  return Date.now() + serverOffsetMs;
+}
+
+function startTimeSyncLoop() {
+  // Sync fast at first, then settle
+  if (timeSyncInterval) clearInterval(timeSyncInterval);
+
+  // Do a quick burst
+  timeSyncOnce();
+  setTimeout(timeSyncOnce, 400);
+  setTimeout(timeSyncOnce, 900);
+
+  // Then keep updating every 5 seconds while page is open
+  timeSyncInterval = setInterval(timeSyncOnce, 5000);
+}
+
+function timeSyncOnce() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "timeSync", clientSend: Date.now() }));
+}
+
+// ==========================
+// UI helpers
+// ==========================
 function setStatus(text, good){
   statusPill.textContent = `Status: ${text}`;
   statusPill.classList.remove("good","bad");
@@ -41,13 +75,17 @@ function updateArmEnabled(){
 familyInput.addEventListener("input", updateArmEnabled);
 updateArmEnabled();
 
+// ==========================
+// Shared time math
+// ==========================
 function expectedOffsetSec(serverStartTimeMs){
-  return Math.max(0, (Date.now() - serverStartTimeMs) / 1000);
+  // Use server-synced clock, NOT Date.now()
+  return Math.max(0, (correctedNowMs() - serverStartTimeMs) / 1000);
 }
 
-/* =========================
-   iOS Native Audio Path
-========================= */
+// =========================
+// iOS Native Audio Path
+// =========================
 function iosStop(){
   try { iosPlayer.pause(); } catch {}
   iosPlayer.removeAttribute("src");
@@ -62,16 +100,15 @@ async function iosPlaySynced(trackId, serverStartTimeMs){
 
   const offset = expectedOffsetSec(serverStartTimeMs);
 
-  // If already playing same track, don’t constantly restart
+  // If already playing same track, don’t restart unless drift > 0.6s
   if (
     iosPlayer.src &&
     currentlyPlayingTrackId === trackId &&
     currentlyPlayingStartTime === serverStartTimeMs &&
     !iosPlayer.paused
   ) {
-    // iOS drift correction: only if REALLY off (> 1.0s)
     const drift = Math.abs((iosPlayer.currentTime || 0) - offset);
-    if (drift < 1.0) {
+    if (drift < 0.6) {
       setStatus("Synced", true);
       return;
     }
@@ -89,13 +126,13 @@ async function iosPlaySynced(trackId, serverStartTimeMs){
     pauseBtn.textContent = "PAUSE";
   } catch (e) {
     console.error("iOS play blocked:", e);
-    setStatus("Tap ARM again (iOS audio blocked)", false);
+    setStatus("Tap PLAY (iOS audio blocked)", false);
   }
 }
 
-/* =========================
-   Non-iOS WebAudio Path
-========================= */
+// =========================
+// Non-iOS WebAudio Path
+// =========================
 function webStop(){
   try { if (source) source.stop(); } catch {}
   source = null;
@@ -129,11 +166,12 @@ async function webEnsurePlayingSynced(trackId, serverStartTimeMs){
 
   const shouldBeSec = expectedOffsetSec(serverStartTimeMs);
 
+  // Avoid restarts unless drift > 0.6s
   if (source && currentlyPlayingTrackId === trackId && currentlyPlayingStartTime === serverStartTimeMs) {
     const isSec = webActualOffsetSec();
     if (isSec != null) {
       const drift = Math.abs(isSec - shouldBeSec);
-      if (drift < 0.8) { setStatus("Synced", true); return; }
+      if (drift < 0.6) { setStatus("Synced", true); return; }
     } else { setStatus("Synced", true); return; }
   }
 
@@ -156,9 +194,9 @@ async function webEnsurePlayingSynced(trackId, serverStartTimeMs){
   pauseBtn.textContent = "PAUSE";
 }
 
-/* =========================
-   Shared Controls
-========================= */
+// =========================
+// Controls
+// =========================
 pauseBtn.addEventListener("click", async () => {
   if (!armed) return;
 
@@ -192,11 +230,13 @@ armBtn.addEventListener("click", async () => {
 
   armBtn.style.display = "none";
   pauseBtn.style.display = "inline-block";
-  setStatus("Armed (waiting…)", false);
+  setStatus("Armed (loading…)", false);
 
-  // iOS unlock trick: attempt to play a tiny sound if you have chime.mp3
-  // (won’t break anything if it fails)
+  // Start clock sync loop now that user interacted
+  startTimeSyncLoop();
+
   if (isIOS) {
+    // iOS unlock trick using your chime.mp3
     try {
       iosPlayer.src = "chime.mp3";
       iosPlayer.currentTime = 0;
@@ -210,20 +250,51 @@ armBtn.addEventListener("click", async () => {
     await audioCtx.resume();
   }
 
-  // Join immediately if broadcast already running
+  setStatus("Armed (waiting…)", false);
+
+  // Join immediately if broadcast running
   if (state.playing && state.trackId && state.startTime) {
     if (isIOS) await iosPlaySynced(state.trackId, state.startTime);
     else await webEnsurePlayingSynced(state.trackId, state.startTime);
   }
 });
 
+// =========================
+// WebSocket
+// =========================
 function init(){
   ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
-  ws.onopen = () => ws.send(JSON.stringify({ type:"hello", role:"client" }));
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type:"hello", role:"client" }));
+    // Start syncing even before ARM; it helps display and readiness.
+    // (No audio starts until ARM)
+    startTimeSyncLoop();
+  };
 
   ws.onmessage = async (e) => {
     const msg = JSON.parse(e.data);
+
+    if (msg.type === "timeSync") {
+      // Compute offset using round-trip time
+      const clientReceive = Date.now();
+      const clientSend = msg.clientSend;
+      const serverTime = msg.serverTime;
+
+      const rtt = clientReceive - clientSend;
+      const approxServerAtReceive = serverTime + (rtt / 2);
+      const newOffset = approxServerAtReceive - clientReceive;
+
+      // Keep the best (lowest RTT) estimate; it’s the cleanest
+      if (rtt < bestRttMs) {
+        bestRttMs = rtt;
+        serverOffsetMs = newOffset;
+      } else {
+        // Gentle smoothing so it doesn’t jump
+        serverOffsetMs = serverOffsetMs * 0.9 + newOffset * 0.1;
+      }
+      return;
+    }
 
     if (msg.type === "tracks") { tracks = msg.tracks || {}; return; }
 
@@ -256,7 +327,10 @@ function init(){
 
       if (armed && !locallyPaused) {
         if (isIOS) await iosPlaySynced(msg.trackId, msg.startTime);
-        else await webEnsurePlayingSynced(msg.trackId, msg.startTime);
+        else {
+          try { await webLoadBuffer(msg.trackId); } catch {}
+          await webEnsurePlayingSynced(msg.trackId, msg.startTime);
+        }
       } else {
         const t = tracks[msg.trackId];
         setNowPlaying(t ? t.name : msg.trackId);
