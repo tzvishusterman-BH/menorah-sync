@@ -1,17 +1,9 @@
-//-------------------------------------------------------------
-//  ADMIN CONTROL CENTER — Berlin Menorah Parade 5786
-//  Playlist Editor + Queue Engine + Skip/Back (Rule A)
-//  Terminate (Kick) Clients • Soft Chime Notifications
-//  Language System • PIN Screen • Live Clock
-//-------------------------------------------------------------
-
 let ws;
-let tracks = {};                 // trackId → {id, name, file, duration}
-let playlist = [];               // ordered array of track IDs
-let broadcastState = {};         // state from server
-let clients = [];                // connected clients
+let tracks = {};          // trackId -> track object
+let playlist = [];
+let broadcastState = null;
+let clients = [];
 
-// UI Elements
 const pinScreen = document.getElementById("pinScreen");
 const adminPanel = document.getElementById("adminPanel");
 const pinInput = document.getElementById("pinInput");
@@ -22,6 +14,9 @@ const playlistContainer = document.getElementById("playlistContainer");
 const addTrackSelect = document.getElementById("addTrackSelect");
 const addTrackBtn = document.getElementById("addTrackBtn");
 const nextOverrideSelect = document.getElementById("nextOverrideSelect");
+
+const playNowSelect = document.getElementById("playNowSelect");
+const playNowBtn = document.getElementById("playNowBtn");
 
 const seekSlider = document.getElementById("seekSlider");
 const timeLabel = document.getElementById("timeLabel");
@@ -35,29 +30,17 @@ const skipBtn = document.getElementById("skipBtn");
 const stopBtn = document.getElementById("stopBtn");
 
 const langSelect = document.getElementById("langSelect");
-
-//==============================================================
-//   1.  PIN SCREEN
-//==============================================================
+const clockEl = document.getElementById("clock");
 
 enterPinBtn.addEventListener("click", () => {
-  const entered = pinInput.value.trim();
-  const correct = "130865";     // Your PIN
-
-  if (entered !== correct) {
-    pinError.innerText = "Incorrect PIN";
+  if (pinInput.value.trim() !== "130865") {
+    pinError.textContent = "Incorrect PIN";
     return;
   }
-
   pinScreen.style.display = "none";
   adminPanel.style.display = "block";
-
   initWebSocket();
 });
-
-//==============================================================
-//   2.  WEBSOCKET SETUP
-//==============================================================
 
 function initWebSocket() {
   ws = new WebSocket(location.origin.replace(/^http/, "ws"));
@@ -66,156 +49,88 @@ function initWebSocket() {
     ws.send(JSON.stringify({ type: "hello", role: "admin" }));
   };
 
-  ws.onmessage = msg => {
+  ws.onmessage = (evt) => {
     let data;
-    try { data = JSON.parse(msg.data); } catch { return; }
+    try { data = JSON.parse(evt.data); } catch { return; }
 
-    switch (data.type) {
+    if (data.type === "tracks") {
+      tracks = {};
+      data.tracks.forEach(t => tracks[t.id] = t);
+      populateSelectors();
+      renderPlaylist();
+      updateStateUI();
+    }
 
-      case "tracks":
-        tracks = {};
-        data.tracks.forEach(t => tracks[t.id] = t);
-        populateTrackSelectors();
-        break;
+    if (data.type === "playlist") {
+      playlist = data.playlist || [];
+      renderPlaylist();
+    }
 
-      case "playlist":
-        playlist = data.playlist;
-        renderPlaylist();
-        break;
+    if (data.type === "state") {
+      broadcastState = data.state;
+      renderPlaylist();
+      updateStateUI();
+    }
 
-      case "state":
-        broadcastState = data.state;
-        updateStateUI();
-        break;
+    if (data.type === "clients") {
+      clients = data.clients || [];
+      renderClientList();
+    }
 
-      case "clients":
-        clients = data.clients;
-        renderClientList();
-        break;
-
-      case "trackEnded":
-        playChime();
-        showToast("Track ended — starting next...");
-        break;
+    if (data.type === "trackEnded") {
+      playChime();
+      showToast("Track ended — next starting…");
     }
   };
 }
 
-//==============================================================
-//   3.  PLAYLIST UI RENDERING
-//==============================================================
-
-// Build dropdowns for Add Track & Next Override
-function populateTrackSelectors() {
+function populateSelectors() {
   addTrackSelect.innerHTML = "";
+  playNowSelect.innerHTML = "";
   nextOverrideSelect.innerHTML = "<option value=''>---</option>";
 
-  for (const id in tracks) {
-    const t = tracks[id];
+  Object.values(tracks).forEach(t => {
+    const o1 = document.createElement("option");
+    o1.value = t.id; o1.textContent = t.name;
+    addTrackSelect.appendChild(o1);
 
-    let opt1 = document.createElement("option");
-    opt1.value = t.id;
-    opt1.textContent = t.name;
-    addTrackSelect.appendChild(opt1);
+    const o2 = document.createElement("option");
+    o2.value = t.id; o2.textContent = t.name;
+    playNowSelect.appendChild(o2);
 
-    let opt2 = document.createElement("option");
-    opt2.value = t.id;
-    opt2.textContent = t.name;
-    nextOverrideSelect.appendChild(opt2);
-  }
+    const o3 = document.createElement("option");
+    o3.value = t.id; o3.textContent = t.name;
+    nextOverrideSelect.appendChild(o3);
+  });
 }
 
 addTrackBtn.addEventListener("click", () => {
   const id = addTrackSelect.value;
   if (!id) return;
-
   playlist.push(id);
-  sendPlaylist();
-});
-
-// Build playlist list view
-function renderPlaylist() {
-  playlistContainer.innerHTML = "";
-
-  playlist.forEach((id, index) => {
-    const t = tracks[id];
-    if (!t) return;
-
-    const card = document.createElement("div");
-    card.className = "trackCard";
-    card.draggable = true;
-    card.dataset.index = index;
-
-    // Highlight if playing
-    if (broadcastState.trackId === id) {
-      card.style.border = "2px solid #1db954";
-    }
-
-    const name = document.createElement("div");
-    name.className = "trackName";
-    name.textContent = t.name;
-
-    const del = document.createElement("button");
-    del.className = "deleteTrack";
-    del.textContent = "X";
-    del.onclick = () => {
-      playlist.splice(index, 1);
-      sendPlaylist();
-    };
-
-    card.appendChild(name);
-    card.appendChild(del);
-
-    // Drag events
-    card.addEventListener("dragstart", onDragStart);
-    card.addEventListener("dragover", onDragOver);
-    card.addEventListener("drop", onDrop);
-
-    playlistContainer.appendChild(card);
-  });
-}
-
-let dragIndex = null;
-
-function onDragStart(e) {
-  dragIndex = Number(e.target.dataset.index);
-}
-
-function onDragOver(e) {
-  e.preventDefault();
-}
-
-function onDrop(e) {
-  const dropIndex = Number(e.target.closest(".trackCard").dataset.index);
-  const item = playlist.splice(dragIndex, 1)[0];
-  playlist.splice(dropIndex, 0, item);
-  sendPlaylist();
-}
-
-// Send updated playlist to server
-function sendPlaylist() {
   ws.send(JSON.stringify({ type: "playlistSet", playlist }));
-}
-
-//==============================================================
-//   4.  NEXT OVERRIDE
-//==============================================================
+});
 
 nextOverrideSelect.addEventListener("change", () => {
-  const val = nextOverrideSelect.value;
-  if (val) {
-    ws.send(JSON.stringify({ type: "setNextOverride", trackId: val }));
-    showToast("Next track override set.");
-  }
+  const id = nextOverrideSelect.value;
+  if (!id) return;
+  ws.send(JSON.stringify({ type: "setNextOverride", trackId: id }));
+  showToast("Next override set.");
 });
 
-//==============================================================
-//   5.  CLIENT LIST + TERMINATE
-//==============================================================
+playNowBtn.addEventListener("click", () => {
+  const id = playNowSelect.value;
+  if (!id) return;
+  ws.send(JSON.stringify({ type: "startTrack", trackId: id }));
+});
+
+backBtn.addEventListener("click", () => ws.send(JSON.stringify({ type: "back" })));
+skipBtn.addEventListener("click", () => ws.send(JSON.stringify({ type: "skip" })));
+stopBtn.addEventListener("click", () => ws.send(JSON.stringify({ type: "stop" })));
 
 function renderClientList() {
-  clientListEl.innerHTML = "";
   clientCountEl.textContent = `${clients.length} Cars Connected`;
+  clientListEl.innerHTML = "";
 
   clients.forEach(c => {
     const row = document.createElement("div");
@@ -226,12 +141,7 @@ function renderClientList() {
     const kill = document.createElement("button");
     kill.className = "terminateBtn";
     kill.textContent = "Terminate";
-    kill.onclick = () => {
-      ws.send(JSON.stringify({
-        type: "terminateClient",
-        clientId: c.id
-      }));
-    };
+    kill.onclick = () => ws.send(JSON.stringify({ type: "terminateClient", clientId: c.id }));
 
     row.appendChild(name);
     row.appendChild(kill);
@@ -239,28 +149,71 @@ function renderClientList() {
   });
 }
 
-//==============================================================
-//   6.  CONTROL BUTTONS — SKIP/BACK/STOP
-//==============================================================
+// ---- Playlist drag/drop ----
+let dragIndex = null;
 
-backBtn.addEventListener("click", () => {
-  ws.send(JSON.stringify({ type: "back" }));
-});
+function renderPlaylist() {
+  playlistContainer.innerHTML = "";
 
-skipBtn.addEventListener("click", () => {
-  ws.send(JSON.stringify({ type: "skip" }));
-});
+  playlist.forEach((id, index) => {
+    const t = tracks[id];
+    if (!t) return;
 
-stopBtn.addEventListener("click", () => {
-  ws.send(JSON.stringify({ type: "stop" }));
-});
+    const card = document.createElement("div");
+    card.className = "trackCard";
+    card.draggable = true;
+    card.dataset.index = String(index);
 
-//==============================================================
-//   7.  NOW PLAYING + SEEK BAR
-//==============================================================
+    if (broadcastState?.trackId === id) {
+      card.style.border = "2px solid #1db954";
+    }
+
+    // click to play NOW
+    card.addEventListener("click", (e) => {
+      if (e.target.classList.contains("deleteTrack")) return;
+      ws.send(JSON.stringify({ type: "startTrack", trackId: id }));
+    });
+
+    const name = document.createElement("div");
+    name.className = "trackName";
+    name.textContent = t.name;
+
+    const del = document.createElement("button");
+    del.className = "deleteTrack";
+    del.textContent = "X";
+    del.onclick = () => {
+      playlist.splice(index, 1);
+      ws.send(JSON.stringify({ type: "playlistSet", playlist }));
+    };
+
+    card.appendChild(name);
+    card.appendChild(del);
+
+    card.addEventListener("dragstart", (e) => dragIndex = Number(e.currentTarget.dataset.index));
+    card.addEventListener("dragover", (e) => e.preventDefault());
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const dropIndex = Number(e.currentTarget.dataset.index);
+      const item = playlist.splice(dragIndex, 1)[0];
+      playlist.splice(dropIndex, 0, item);
+      ws.send(JSON.stringify({ type: "playlistSet", playlist }));
+    });
+
+    playlistContainer.appendChild(card);
+  });
+}
+
+// ---- Now playing + seek display (display-only) ----
+function fmt(ms) {
+  ms = Math.max(0, ms);
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${String(m).padStart(2,"0")}:${String(r).padStart(2,"0")}`;
+}
 
 function updateStateUI() {
-  if (!broadcastState || !broadcastState.trackId) {
+  if (!broadcastState || broadcastState.mode !== "playing" || !broadcastState.trackId) {
     nowPlayingEl.textContent = "Now Playing: —";
     seekSlider.value = 0;
     timeLabel.textContent = "00:00 / 00:00";
@@ -268,41 +221,26 @@ function updateStateUI() {
   }
 
   const t = tracks[broadcastState.trackId];
-  nowPlayingEl.textContent = "Now Playing: " + t.name;
+  if (!t) return;
 
-  // Update playlist highlight
-  renderPlaylist();
+  const elapsed = Date.now() - broadcastState.serverStartTime;
+  const dur = t.duration;
 
-  if (!broadcastState.serverStartTime) return;
+  nowPlayingEl.textContent = `Now Playing: ${t.name}`;
 
-  const now = Date.now();
-  const elapsed = now - broadcastState.serverStartTime;
-
-  let dur = t.duration;
-  let pct = Math.min(100, Math.floor((elapsed / dur) * 100));
+  // slider shows percentage only
+  const pct = Math.max(0, Math.min(100, Math.round((elapsed / dur) * 100)));
   seekSlider.value = pct;
-
-  function fmt(ms) {
-    let s = Math.floor(ms / 1000);
-    let m = Math.floor(s / 60);
-    s = s % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
-  timeLabel.textContent =
-    `${fmt(elapsed)} / ${fmt(dur)}`;
+  timeLabel.textContent = `${fmt(elapsed)} / ${fmt(dur)}`;
 }
 
 setInterval(updateStateUI, 250);
 
-//==============================================================
-//   8.  NOTIFICATIONS (Soft Chime + Toast)
-//==============================================================
-
+// ---- Notifications ----
 function playChime() {
-  const audio = new Audio("chime.mp3");
-  audio.volume = 0.4;
-  audio.play().catch(() => {});
+  const a = new Audio("chime.mp3");
+  a.volume = 0.5;
+  a.play().catch(() => {});
 }
 
 function showToast(msg) {
@@ -320,45 +258,25 @@ function showToast(msg) {
   toast.style.zIndex = 9999;
   toast.style.opacity = 1;
   toast.style.transition = "opacity 1s ease-out";
-
   document.body.appendChild(toast);
-
   setTimeout(() => toast.style.opacity = 0, 1500);
   setTimeout(() => toast.remove(), 2600);
 }
 
-//==============================================================
-//   9.  LANGUAGE SYSTEM
-//==============================================================
-
+// ---- Language ----
 langSelect.addEventListener("change", () => {
   const lang = langSelect.value;
   localStorage.setItem("adminLang", lang);
   applyTranslations(lang);
 });
 
-function applyTranslations(lang) {
-  document.querySelectorAll("[data-i18n]").forEach(el => {
-    const key = el.dataset.i18n;
-    el.textContent = translations[lang][key] || key;
-  });
-}
+const saved = localStorage.getItem("adminLang") || "en";
+langSelect.value = saved;
+applyTranslations(saved);
 
-// Load saved language:
-const savedLang = localStorage.getItem("adminLang") || "en";
-langSelect.value = savedLang;
-applyTranslations(savedLang);
-
-//==============================================================
-//   10. LIVE CLOCK
-//==============================================================
-
-const clockEl = document.getElementById("clock");
-
+// ---- Clock ----
 setInterval(() => {
   const d = new Date();
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
-  clockEl.textContent = `${h}:${m}:${s}`;
-}, 500);
+  clockEl.textContent =
+    `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
+}, 300);
