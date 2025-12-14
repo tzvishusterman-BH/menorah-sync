@@ -9,6 +9,8 @@ const familyInput = document.getElementById("familyName");
 const statusPill = document.getElementById("statusPill");
 const nowPlayingPill = document.getElementById("nowPlayingPill");
 
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
 let armed = false;
 let locallyPaused = false;
 
@@ -54,6 +56,7 @@ function ensureTrackLoaded(trackId){
   const t = tracks[trackId];
   if (!t) return false;
 
+  // already loaded?
   if (currentTrackId === trackId && audio.src && audio.src.includes(encodeURI(t.file))) {
     return true;
   }
@@ -71,7 +74,15 @@ async function timeSyncOnce(){
   }
 }
 
-// Start/sync playback to the parade position
+// 🔥 iOS-safe: only hard resync if REALLY off
+function driftThreshold(){
+  return isIOS ? 1.2 : 0.35; // seconds
+}
+function driftLoopInterval(){
+  return isIOS ? 3500 : 1200; // ms
+}
+
+// Start/sync playback to parade position
 async function syncToParade(trackId, startTimeMs){
   if (!armed) return;
   if (!trackId || !startTimeMs) return;
@@ -80,7 +91,7 @@ async function syncToParade(trackId, startTimeMs){
 
   setNowPlaying(t.name);
 
-  // If user paused locally, don’t force audio; just show status
+  // If user paused locally, don’t force audio
   if (locallyPaused) {
     setStatus("Paused (tap PLAY to re-sync)", false);
     return;
@@ -90,7 +101,7 @@ async function syncToParade(trackId, startTimeMs){
 
   const delayMs = Math.round(startTimeMs - correctedNowMs());
 
-  // Countdown start (future)
+  // Countdown start in the future
   if (delayMs > 0) {
     stopButKeepSrc();
     clearSchedule();
@@ -118,20 +129,27 @@ async function syncToParade(trackId, startTimeMs){
     const actual = audio.currentTime || 0;
     const drift = Math.abs(actual - shouldBe);
 
-    // If not playing, start at correct point
     if (!playing) {
+      // late join / coming back: jump right to correct place
       audio.currentTime = shouldBe;
       await audio.play();
       setStatus("Playing (Synced)", true);
       return;
     }
 
-    // If playing but drift large, snap back
-    if (drift > 0.35) {
-      audio.pause();
-      audio.currentTime = shouldBe;
-      await audio.play();
-      setStatus("Playing (Resynced)", true);
+    // While playing:
+    // - On iOS: avoid pause/play churn; only adjust if VERY off
+    if (drift > driftThreshold()) {
+      if (isIOS) {
+        // iOS: do a single jump without restarting playback
+        audio.currentTime = shouldBe;
+        setStatus("Playing (Resynced)", true);
+      } else {
+        audio.pause();
+        audio.currentTime = shouldBe;
+        await audio.play();
+        setStatus("Playing (Resynced)", true);
+      }
     } else {
       setStatus("Playing (Synced)", true);
     }
@@ -140,27 +158,38 @@ async function syncToParade(trackId, startTimeMs){
   }
 }
 
-// Drift correction loop (keeps “last week” tightness)
-setInterval(async () => {
-  if (!armed) return;
-  if (locallyPaused) return;
-  if (!state.playing || !state.trackId || !state.startTime) return;
-  if (!ensureTrackLoaded(state.trackId)) return;
-  if (audio.paused) return;
+// Drift correction loop (gentle on iOS)
+let driftTimer = null;
+function startDriftLoop(){
+  if (driftTimer) clearInterval(driftTimer);
+  driftTimer = setInterval(async () => {
+    if (!armed) return;
+    if (locallyPaused) return;
+    if (!state.playing || !state.trackId || !state.startTime) return;
+    if (!ensureTrackLoaded(state.trackId)) return;
+    if (audio.paused) return;
 
-  const shouldBe = expectedOffsetSec(state.startTime);
-  const actual = audio.currentTime || 0;
-  const drift = actual - shouldBe;
+    const shouldBe = expectedOffsetSec(state.startTime);
+    const actual = audio.currentTime || 0;
+    const drift = actual - shouldBe;
 
-  if (Math.abs(drift) > 0.45) {
-    try {
-      audio.pause();
-      audio.currentTime = shouldBe;
-      await audio.play();
-      setStatus("Playing (Resynced)", true);
-    } catch {}
-  }
-}, 1200);
+    // Only correct if significantly off
+    if (Math.abs(drift) > driftThreshold()) {
+      try {
+        if (isIOS) {
+          // no pause/play
+          audio.currentTime = shouldBe;
+        } else {
+          audio.pause();
+          audio.currentTime = shouldBe;
+          await audio.play();
+        }
+        setStatus("Playing (Resynced)", true);
+      } catch {}
+    }
+  }, driftLoopInterval());
+}
+startDriftLoop();
 
 // ARM
 armBtn.onclick = async () => {
@@ -171,7 +200,7 @@ armBtn.onclick = async () => {
     return;
   }
 
-  // register name (for admin list)
+  // register name for admin list
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type:"register", name }));
@@ -186,7 +215,7 @@ armBtn.onclick = async () => {
 
   setStatus("Armed", false);
 
-  // iOS unlock trick (uses your chime.mp3 if present; safe if missing)
+  // iOS unlock trick (safe if missing)
   try {
     audio.src = "chime.mp3";
     audio.currentTime = 0;
@@ -196,16 +225,15 @@ armBtn.onclick = async () => {
     audio.load();
   } catch {}
 
-  // Kick time sync once
   await timeSyncOnce();
 
-  // Late join guarantee: if something is playing, sync immediately
+  // Late join guarantee
   if (state.playing && state.trackId && state.startTime) {
     await syncToParade(state.trackId, state.startTime);
   }
 };
 
-// Pause/Play button: PLAY = REJOIN PARADE (not local resume)
+// Pause/Play button: PLAY = rejoin parade
 pauseBtn.onclick = async () => {
   if (!armed) return;
 
@@ -266,7 +294,6 @@ ws.onmessage = async (e) => {
       return;
     }
 
-    // Broadcast running
     if (!armed) {
       setStatus("Broadcast running — ARM to join", false);
       return;
