@@ -39,11 +39,14 @@ let playlist = [
 
 let currentIndex = -1;
 
+// Lead time (THIS is the big sync improvement)
+const START_LEAD_MS = 2500;
+
 // Broadcast state
 let state = {
   playing: false,
   trackId: null,
-  startTime: null
+  startTime: null // server epoch ms when playback should begin
 };
 
 let nextTimer = null;
@@ -78,16 +81,15 @@ function clearNextTimer() {
   nextTimer = null;
 }
 
-function scheduleAutoNext() {
+function scheduleAutoNext(trackId) {
   clearNextTimer();
-  if (!state.playing || !state.trackId) return;
-
-  const dur = TRACKS[state.trackId]?.duration;
+  const dur = TRACKS[trackId]?.duration;
   if (!dur) return;
 
+  // Because we start in the future, next should be scheduled after lead + duration
   nextTimer = setTimeout(() => {
     playByIndex((currentIndex + 1) % playlist.length);
-  }, dur);
+  }, START_LEAD_MS + dur);
 }
 
 function playByIndex(index) {
@@ -102,16 +104,18 @@ function playByIndex(index) {
 
   state.playing = true;
   state.trackId = trackId;
-  state.startTime = Date.now();
 
-  // Tell clients to play this track at this startTime
+  // ✅ Start in the future so everyone starts together
+  state.startTime = Date.now() + START_LEAD_MS;
+
+  // Tell clients to prepare + start at that exact server time
   broadcast(clients, { type: "play", trackId, startTime: state.startTime });
 
-  // Update admins + clients with state
+  // Update admins + clients
   broadcastState();
 
   // Auto-advance
-  scheduleAutoNext();
+  scheduleAutoNext(trackId);
 }
 
 function startPlaylist() {
@@ -132,7 +136,7 @@ function skip() {
 function back() {
   if (!playlist.length) return;
 
-  // Back Rule A (same as earlier): if > 5s into track, restart same track, else previous
+  // Back Rule A: if >5s into the actual track time, restart same; else previous
   if (state.playing && state.startTime) {
     const msInto = Date.now() - state.startTime;
     if (msInto > 5000) {
@@ -159,16 +163,12 @@ wss.on("connection", (ws) => {
   ws.on("message", (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
-// --- TIME SYNC (for tighter audio sync) ---
-if (msg.type === "timeSync") {
-  // Echo back client's send time + server time
-  send(ws, {
-    type: "timeSync",
-    clientSend: msg.clientSend,
-    serverTime: Date.now()
-  });
-  return;
-}
+
+    // --- TIME SYNC (optional but helpful) ---
+    if (msg.type === "timeSync") {
+      send(ws, { type: "timeSync", clientSend: msg.clientSend, serverTime: Date.now() });
+      return;
+    }
 
     if (msg.type === "hello") {
       ws.role = msg.role;
@@ -202,26 +202,11 @@ if (msg.type === "timeSync") {
     }
 
     if (ws.role === "admin") {
-      if (msg.type === "startPlaylist") {
-        startPlaylist();
-        return;
-      }
-      if (msg.type === "playTrack") {
-        if (TRACKS[msg.trackId]) playTrack(msg.trackId);
-        return;
-      }
-      if (msg.type === "skip") {
-        skip();
-        return;
-      }
-      if (msg.type === "back") {
-        back();
-        return;
-      }
-      if (msg.type === "stop") {
-        stop();
-        return;
-      }
+      if (msg.type === "startPlaylist") return startPlaylist();
+      if (msg.type === "playTrack" && TRACKS[msg.trackId]) return playTrack(msg.trackId);
+      if (msg.type === "skip") return skip();
+      if (msg.type === "back") return back();
+      if (msg.type === "stop") return stop();
     }
   });
 
