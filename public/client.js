@@ -168,7 +168,52 @@ pauseBtn.addEventListener("click", async () => {
 
 armBtn.addEventListener("click", async () => {
   const name = familyInput.value.trim();
-  if (!name) return;
+  if (!name) {
+    alert("Please enter your family name first.");
+    familyInput.focus();
+    return;
+  }
+
+  // Don't crash if websocket isn't ready yet
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type:"register", name }));
+  }
+
+  armed = true;
+  locallyPaused = false;
+
+  armBtn.style.display = "none";
+  pauseBtn.style.display = "inline-block";
+  setStatus("Armed (loading…)", false);
+
+  // Start clock sync loop (if present)
+  if (typeof startTimeSyncLoop === "function") {
+    startTimeSyncLoop();
+  }
+
+  if (isIOS) {
+    // iOS unlock trick (chime.mp3)
+    try {
+      iosPlayer.src = "chime.mp3";
+      iosPlayer.currentTime = 0;
+      await iosPlayer.play();
+      iosPlayer.pause();
+      iosPlayer.removeAttribute("src");
+      iosPlayer.load();
+    } catch {}
+  } else {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+    await audioCtx.resume();
+  }
+
+  setStatus("Armed (waiting…)", false);
+
+  // If broadcast already running, join now
+  if (state.playing && state.trackId && state.startTime) {
+    await startPlaybackAtServerTime(state.trackId, state.startTime);
+  }
+});
+
 
   ws.send(JSON.stringify({ type:"register", name }));
 
