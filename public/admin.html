@@ -1,124 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>Admin — Berlin Menorah Parade 5786</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<style>
-  body { margin:0; padding:0; background:#0d0d0d; color:#fff; font-family:Arial,sans-serif; }
-  h1 { text-align:center; font-size:2rem; margin:20px 0 5px; color:#1db954; }
-
-  #langSelect { position:fixed; top:15px; right:15px; padding:8px; background:#1db954; border:none; font-weight:bold; border-radius:6px; cursor:pointer; }
-
-  .card { background:#181818; border:1px solid #282828; border-radius:12px; padding:18px; margin:15px; }
-
-  #clock { text-align:center; font-size:2.6rem; font-weight:bold; color:#1db954; margin-top:10px; }
-
-  #clientCount { font-size:1.2rem; margin-bottom:10px; }
-
-  #clientList div { background:#222; padding:10px; border-radius:8px; margin-top:6px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
-  .terminateBtn { background:#ff5555; padding:6px 10px; border-radius:6px; border:none; color:#fff; cursor:pointer; }
-
-  #playlistContainer { margin-top:10px; }
-  .trackCard { background:#202020; border:1px solid #333; border-radius:10px; padding:12px; margin-top:8px; display:flex; align-items:center; justify-content:space-between; cursor:move; }
-  .trackName { font-size:1.05rem; }
-  .deleteTrack { background:#ff4444; padding:6px 10px; border:none; border-radius:8px; cursor:pointer; color:#fff; }
-
-  #addTrackRow { display:flex; margin-top:10px; gap:8px; }
-  select { padding:10px; border-radius:8px; background:#2a2a2a; color:#fff; border:none; width:100%; }
-
-  #addTrackBtn, #playNowBtn {
-    padding:10px 15px; background:#1db954; border:none; border-radius:8px; cursor:pointer; font-weight:bold; width:auto;
-  }
-
-  #nowPlaying { font-size:1.25rem; margin-bottom:10px; }
-
-  #seekSlider {
-    width:100%; margin-top:10px; -webkit-appearance:none;
-    height:7px; background:#333; border-radius:5px;
-  }
-  #seekSlider::-webkit-slider-thumb { -webkit-appearance:none; background:#1db954; width:18px; height:18px; border-radius:50%; cursor:pointer; }
-
-  #timeLabel { margin-top:6px; font-size:.9rem; color:#ccc; text-align:right; }
-
-  #controls { display:flex; gap:10px; align-items:center; margin-top:10px; }
-  #controls button { padding:10px 14px; border:none; border-radius:8px; background:#1db954; color:#000; font-weight:bold; cursor:pointer; }
-  #stopBtn { background:#ff4444 !important; color:#fff; }
-
-  /* PIN */
-  #pinScreen { text-align:center; margin-top:120px; }
-  #pinInput { width:200px; padding:12px; border-radius:8px; background:#222; color:#fff; border:none; margin-top:12px; }
-  #enterPinBtn { padding:12px 20px; margin-top:12px; background:#1db954; border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
-  #pinError { margin-top:10px; color:#ff4444; }
-</style>
+<title>Admin</title>
 </head>
-
 <body>
+<h1>Admin — Berlin Menorah Parade 5786</h1>
+<button id="start">START PLAYLIST</button>
+<ul id="clients"></ul>
 
-<select id="langSelect">
-  <option value="en">EN</option>
-  <option value="he">HE</option>
-  <option value="ru">RU</option>
-  <option value="de">DE</option>
-</select>
-
-<h1 data-i18n="adminTitle">Admin — Berlin Menorah Parade 5786</h1>
-
-<div id="pinScreen">
-  <h2 data-i18n="enterPin">Enter Admin PIN</h2>
-  <input type="password" id="pinInput" placeholder="PIN">
-  <button id="enterPinBtn" data-i18n="enter">Enter</button>
-  <div id="pinError"></div>
-</div>
-
-<div id="adminPanel" style="display:none;">
-
-  <div class="card">
-    <div id="clock">--:--:--</div>
-  </div>
-
-  <div class="card">
-    <div id="clientCount">0 Cars Connected</div>
-    <div id="clientList"></div>
-  </div>
-
-  <div class="card">
-    <div id="nowPlaying">Now Playing: —</div>
-
-    <!-- PLAY NOW -->
-    <div style="display:flex; gap:8px; align-items:center; margin:10px 0;">
-      <select id="playNowSelect"></select>
-      <button id="playNowBtn">PLAY NOW</button>
-    </div>
-
-    <input type="range" id="seekSlider" min="0" max="100" value="0">
-    <div id="timeLabel">00:00 / 00:00</div>
-
-    <div id="controls">
-      <button id="backBtn">⏮</button>
-      <button id="skipBtn">⏭</button>
-      <button id="stopBtn">STOP</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2 data-i18n="playlist">Playlist</h2>
-
-    <div id="playlistContainer"></div>
-
-    <div id="addTrackRow">
-      <select id="addTrackSelect"></select>
-      <button id="addTrackBtn" data-i18n="add">Add</button>
-    </div>
-
-    <h3 style="margin-top:12px;" data-i18n="nextOverride">Set Next Track Override:</h3>
-    <select id="nextOverrideSelect"></select>
-  </div>
-
-</div>
-
-<script src="translations.js"></script>
 <script src="admin.js"></script>
 </body>
 </html>

@@ -1,11 +1,7 @@
-//-------------------------------------------------------------
-//  BERLIN MENORAH PARADE — MASTER SYNC SERVER
-//-------------------------------------------------------------
-
-const path = require("path");
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
@@ -13,9 +9,9 @@ const wss = new WebSocket.Server({ server });
 
 app.use(express.static(path.join(__dirname, "public")));
 
-//==========================
-// TRACK DEFINITIONS
-//==========================
+// ==========================
+// TRACK DEFINITIONS (ALL)
+// ==========================
 const TRACKS = {
   tyh: { id: "tyh", name: "Thank You Hashem", file: "TYH.mp3", duration: 532000 },
   matisyahu: { id: "matisyahu", name: "Matisyahu", file: "Matisyahu.mp3", duration: 247000 },
@@ -28,286 +24,117 @@ const TRACKS = {
   srulivnetanel: { id: "srulivnetanel", name: "Sruli & Netanel", file: "Sruli V'Netanel.mp3", duration: 206000 }
 };
 
-//==========================
-// GLOBAL STATE
-//==========================
-let playlist = ["tyh", "matisyahu", "yoniz"]; // default; admin can edit
-let nextOverride = null;
-
-let clients = new Set();
-let adminClients = new Set();
-
-let clientMeta = new Map();
-let nextClientId = 1;
-
-let broadcastState = {
-  mode: "idle",              // "idle" | "playing"
+// ==========================
+// STATE
+// ==========================
+let playlist = Object.keys(TRACKS);
+let currentIndex = -1;
+let state = {
+  playing: false,
   trackId: null,
-  serverStartTime: null
+  startTime: null
 };
 
-let trackEndTimer = null;
+const clients = new Set();
+const admins = new Set();
+const clientNames = new Map();
 
-//==========================
+// ==========================
 // HELPERS
-//==========================
+// ==========================
 function send(ws, obj) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
 }
 
 function broadcast(set, obj) {
-  const data = JSON.stringify(obj);
+  const msg = JSON.stringify(obj);
   for (const ws of set) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
   }
 }
 
-function sendClientList() {
-  const list = [];
-  for (const ws of clients) {
-    const m = clientMeta.get(ws);
-    if (m) list.push(m);
-  }
-  broadcast(adminClients, { type: "clients", clients: list });
-}
+// ==========================
+// PLAYBACK ENGINE
+// ==========================
+function startTrackByIndex(index) {
+  if (index < 0 || index >= playlist.length) return;
 
-function sendStateToAll() {
-  broadcast(adminClients, { type: "state", state: broadcastState });
-  broadcast(clients, { type: "state", state: broadcastState });
-}
+  currentIndex = index;
+  const trackId = playlist[index];
 
-function sendPlaylistToAdmins() {
-  broadcast(adminClients, { type: "playlist", playlist });
-}
+  state.playing = true;
+  state.trackId = trackId;
+  state.startTime = Date.now();
 
-function getNextTrackId() {
-  if (nextOverride) {
-    const tmp = nextOverride;
-    nextOverride = null;
-    return tmp;
-  }
-  if (!playlist.length) return null;
-
-  const idx = playlist.indexOf(broadcastState.trackId);
-  const nextIdx = (idx === -1) ? 0 : (idx + 1) % playlist.length; // loop
-  return playlist[nextIdx];
-}
-
-function scheduleTrackEnd(trackId) {
-  if (trackEndTimer) clearTimeout(trackEndTimer);
-
-  const dur = TRACKS[trackId]?.duration ?? 0;
-  const wait = Math.max(100, dur - 150); // never negative
-
-  trackEndTimer = setTimeout(() => {
-    // notify admins (for chime + toast)
-    broadcast(adminClients, { type: "trackEnded", trackId });
-
-    const nextId = getNextTrackId();
-    if (nextId) startTrack(nextId);
-  }, wait);
-}
-
-function startTrack(trackId) {
-  if (!TRACKS[trackId]) return;
-
-  broadcastState.mode = "playing";
-  broadcastState.trackId = trackId;
-  broadcastState.serverStartTime = Date.now();
-
-  // tell clients exactly what to play + start timestamp
   broadcast(clients, {
-    type: "seek",
+    type: "play",
     trackId,
-    serverStartTime: broadcastState.serverStartTime
+    startTime: state.startTime
   });
 
-  sendStateToAll();
-  scheduleTrackEnd(trackId);
+  broadcast(admins, { type: "state", state });
+
+  setTimeout(() => {
+    startTrackByIndex((currentIndex + 1) % playlist.length);
+  }, TRACKS[trackId].duration);
 }
 
-function stopBroadcast() {
-  broadcastState.mode = "idle";
-  broadcastState.trackId = null;
-  broadcastState.serverStartTime = null;
-
-  if (trackEndTimer) clearTimeout(trackEndTimer);
-  trackEndTimer = null;
-
-  broadcast(clients, { type: "stop" });
-  sendStateToAll();
-}
-
-function skipTrack() {
-  const nextId = getNextTrackId();
-  if (nextId) startTrack(nextId);
-}
-
-function backTrack() {
-  if (!broadcastState.trackId || !broadcastState.serverStartTime) return;
-
-  const msInto = Date.now() - broadcastState.serverStartTime;
-
-  if (msInto > 5000) {
-    // restart same track
-    startTrack(broadcastState.trackId);
-    return;
-  }
-
-  // previous in playlist (wrap)
-  const idx = playlist.indexOf(broadcastState.trackId);
-  if (idx <= 0) startTrack(playlist[playlist.length - 1]);
-  else startTrack(playlist[idx - 1]);
-}
-
-function terminateClient(clientId) {
-  for (const ws of clients) {
-    const m = clientMeta.get(ws);
-    if (m && m.id === clientId) {
-      send(ws, { type: "terminated" });
-      try { ws.close(); } catch {}
-      clients.delete(ws);
-      clientMeta.delete(ws);
-      sendClientList();
-      return;
-    }
-  }
-}
-
-//==========================
+// ==========================
 // WEBSOCKET
-//==========================
+// ==========================
 wss.on("connection", (ws) => {
+  ws.role = null;
 
   ws.on("message", (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // -------------------------
-    // HELLO (sets role!)  ✅ FIX
-    // -------------------------
+    // ---- HELLO ----
     if (msg.type === "hello") {
-      if (msg.role === "admin") {
-        ws.role = "admin";                 // ✅ CRITICAL
-        adminClients.add(ws);
+      ws.role = msg.role;
 
-        send(ws, { type: "tracks", tracks: Object.values(TRACKS) });
-        send(ws, { type: "playlist", playlist });
-        send(ws, { type: "state", state: broadcastState });
-        sendClientList();
-        return;
-      }
-
-      if (msg.role === "client") {
-        ws.role = "client";                // ✅ CRITICAL
+      if (ws.role === "client") {
         clients.add(ws);
-
-        clientMeta.set(ws, {
-          id: nextClientId++,
-          name: null,
-          armed: false,
-          playing: false
-        });
-
-        send(ws, { type: "tracks", tracks: Object.values(TRACKS) });
-        send(ws, { type: "state", state: broadcastState });
-        sendClientList();
-        return;
+        send(ws, { type: "tracks", tracks: TRACKS });
+        send(ws, { type: "state", state });
+        broadcast(admins, { type: "clients", list: [...clientNames.values()] });
       }
 
+      if (ws.role === "admin") {
+        admins.add(ws);
+        send(ws, { type: "tracks", tracks: TRACKS });
+        send(ws, { type: "playlist", playlist });
+        send(ws, { type: "state", state });
+      }
       return;
     }
 
-    // -------------------------
-    // CLIENT MESSAGES
-    // -------------------------
+    // ---- CLIENT ----
     if (ws.role === "client") {
-      const meta = clientMeta.get(ws);
-      if (!meta) return;
-
       if (msg.type === "register") {
-        meta.name = String(msg.name || "").trim() || null;
-        sendClientList();
-        return;
+        clientNames.set(ws, msg.name);
+        broadcast(admins, { type: "clients", list: [...clientNames.values()] });
       }
-
-      if (msg.type === "armed") {
-        meta.armed = true;
-        sendClientList();
-        return;
-      }
-
-      if (msg.type === "clientState") {
-        meta.playing = !!msg.playing;
-        sendClientList();
-        return;
-      }
-
-      return;
     }
 
-    // -------------------------
-    // ADMIN MESSAGES
-    // -------------------------
+    // ---- ADMIN ----
     if (ws.role === "admin") {
-
-      if (msg.type === "playlistSet") {
-        // sanitize playlist
-        const next = Array.isArray(msg.playlist) ? msg.playlist.filter(id => TRACKS[id]) : [];
-        playlist = next.length ? next : playlist;
-        sendPlaylistToAdmins();
-        return;
+      if (msg.type === "startPlaylist") {
+        startTrackByIndex(0);
       }
-
-      if (msg.type === "setNextOverride") {
-        if (TRACKS[msg.trackId]) nextOverride = msg.trackId;
-        return;
-      }
-
-      if (msg.type === "startTrack") {
-        startTrack(msg.trackId);
-        return;
-      }
-
-      if (msg.type === "skip") {
-        skipTrack();
-        return;
-      }
-
-      if (msg.type === "back") {
-        backTrack();
-        return;
-      }
-
-      if (msg.type === "stop") {
-        stopBroadcast();
-        return;
-      }
-
-      if (msg.type === "terminateClient") {
-        terminateClient(msg.clientId);
-        return;
-      }
-
-      return;
     }
   });
 
   ws.on("close", () => {
-    if (ws.role === "client") {
-      clients.delete(ws);
-      clientMeta.delete(ws);
-      sendClientList();
-    } else if (ws.role === "admin") {
-      adminClients.delete(ws);
-    }
+    clients.delete(ws);
+    admins.delete(ws);
+    clientNames.delete(ws);
+    broadcast(admins, { type: "clients", list: [...clientNames.values()] });
   });
 });
 
-//==========================
-// START SERVER
-//==========================
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("Menorah Parade Sync Server running on port", PORT);
-});
+server.listen(process.env.PORT || 3000, () =>
+  console.log("Menorah Sync running")
+);
