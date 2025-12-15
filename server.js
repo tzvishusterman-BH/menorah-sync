@@ -41,7 +41,7 @@ const clients = new Set();
 const admins = new Set();
 const clientNames = new Map();
 
-let nextTimer = null;
+let endTimer = null;
 let preloadTimer = null;
 
 function send(ws, obj) {
@@ -60,31 +60,31 @@ function broadcastClientsList() {
 }
 
 function clearTimers() {
-  if (nextTimer) clearTimeout(nextTimer);
+  if (endTimer) clearTimeout(endTimer);
   if (preloadTimer) clearTimeout(preloadTimer);
-  nextTimer = null;
+  endTimer = null;
   preloadTimer = null;
 }
 
 function currentElapsedMs() {
   if (!state.playing || !state.trackId || !state.startTime) return 0;
-  const elapsed = Math.max(0, Date.now() - state.startTime); // clamp countdown to 0
   if (state.paused) return Math.max(0, state.pausedAtMs);
-  return elapsed;
+  return Math.max(0, Date.now() - state.startTime); // clamps countdown to 0 automatically
 }
 
 function getNextTrackId() {
   const list = state.playlist || [];
   if (!list.length) return null;
   const i = state.playlistIndex ?? 0;
-  const nextI = Math.min(i + 1, list.length - 1);
-  if (nextI === i) return null;
+  const nextI = i + 1;
+  if (nextI >= list.length) return null;
   return list[nextI];
 }
 
-function scheduleAutoAdvance() {
+function scheduleAutoNext() {
   clearTimers();
-  if (!state.playing || state.paused || !state.trackId) return;
+
+  if (!state.playing || state.paused || !state.trackId || !state.startTime) return;
 
   const t = TRACKS[state.trackId];
   if (!t?.duration) return;
@@ -94,34 +94,46 @@ function scheduleAutoAdvance() {
 
   const nextId = getNextTrackId();
   if (nextId) {
-    const inMs = Math.max(0, remaining - PRELOAD_LEAD_MS);
+    const preloadIn = Math.max(0, remaining - PRELOAD_LEAD_MS);
     preloadTimer = setTimeout(() => {
       broadcast(clients, { type: "preload", trackId: nextId });
       broadcast(admins, { type: "preload", trackId: nextId });
-    }, inMs);
+    }, preloadIn);
   }
 
-  nextTimer = setTimeout(() => {
-    advanceToNextTrack();
+  endTimer = setTimeout(() => {
+    // If something changed meanwhile, don't advance incorrectly
+    if (!state.playing || state.paused) return;
+
+    const nowElapsed = currentElapsedMs();
+    const stillSame = state.trackId === t.id;
+    const atEnd = nowElapsed >= (t.duration - 30); // small tolerance
+
+    if (stillSame && atEnd) {
+      advanceToNextTrack();
+    } else {
+      // if drifted (seek etc.), reschedule
+      scheduleAutoNext();
+    }
   }, remaining);
 }
 
 function startTrack(trackId) {
   if (!TRACKS[trackId]) return;
 
-  clearTimers();
   state.playing = true;
   state.paused = false;
   state.trackId = trackId;
   state.pausedAtMs = 0;
 
+  // Countdown lead-in for new starts
   state.startTime = Date.now() + START_LEAD_MS;
 
   broadcast(clients, { type: "play", trackId, startTime: state.startTime });
   broadcast(admins, { type: "play", trackId, startTime: state.startTime });
   broadcastState();
 
-  scheduleAutoAdvance();
+  scheduleAutoNext();
 }
 
 function stopAll() {
@@ -142,7 +154,9 @@ function pauseAll() {
 
   clearTimers();
   state.paused = true;
-  state.pausedAtMs = currentElapsedMs(); // never negative
+
+  // If paused during countdown, elapsed is 0
+  state.pausedAtMs = Math.max(0, Date.now() - state.startTime);
 
   broadcast(clients, { type: "pause", pausedAtMs: state.pausedAtMs });
   broadcast(admins, { type: "pause", pausedAtMs: state.pausedAtMs });
@@ -159,12 +173,10 @@ function resumeAll() {
   broadcast(admins, { type: "play", trackId: state.trackId, startTime: state.startTime });
   broadcastState();
 
-  scheduleAutoAdvance();
+  scheduleAutoNext();
 }
 
-// ✅ NEW: Seek (admin only)
-// If playing: broadcast a new play with updated startTime so everyone jumps.
-// If paused: just update pausedAtMs so resume continues from slider.
+// SEEK: if paused -> update pausedAtMs; if playing -> update startTime and broadcast new play
 function seekToMs(ms) {
   if (!state.playing || !state.trackId) return;
   const t = TRACKS[state.trackId];
@@ -180,15 +192,13 @@ function seekToMs(ms) {
     return;
   }
 
-  // Live seek: make "now" correspond to new position
-  clearTimers();
   state.startTime = Date.now() - clamped;
 
   broadcast(clients, { type: "play", trackId: state.trackId, startTime: state.startTime });
   broadcast(admins, { type: "play", trackId: state.trackId, startTime: state.startTime });
   broadcastState();
 
-  scheduleAutoAdvance();
+  scheduleAutoNext();
 }
 
 function advanceToNextTrack() {
@@ -196,8 +206,12 @@ function advanceToNextTrack() {
   if (!list.length) return stopAll();
 
   const i = state.playlistIndex ?? 0;
-  const nextI = Math.min(i + 1, list.length - 1);
-  if (nextI === i) return stopAll();
+  const nextI = i + 1;
+
+  if (nextI >= list.length) {
+    // End of playlist: stop (or loop if you want; tell me and I’ll change it)
+    return stopAll();
+  }
 
   state.playlistIndex = nextI;
   startTrack(list[nextI]);
@@ -247,17 +261,8 @@ wss.on("connection", (ws) => {
     if (ws.role !== "admin") return;
 
     if (msg.type === "stop") return stopAll();
-
-    if (msg.type === "togglePause") {
-      if (!state.playing) return;
-      if (!state.paused) return pauseAll();
-      return resumeAll();
-    }
-
-    if (msg.type === "seek") {
-      // msg.positionMs required
-      return seekToMs(msg.positionMs);
-    }
+    if (msg.type === "togglePause") return state.paused ? resumeAll() : pauseAll();
+    if (msg.type === "seek") return seekToMs(msg.positionMs);
 
     if (msg.type === "next") return advanceToNextTrack();
     if (msg.type === "back") return goBackTrack();
@@ -265,8 +270,10 @@ wss.on("connection", (ws) => {
     if (msg.type === "playTrack") {
       const id = msg.trackId;
       if (!TRACKS[id]) return;
+
       const idx = (state.playlist || []).indexOf(id);
       if (idx >= 0) state.playlistIndex = idx;
+
       return startTrack(id);
     }
 
