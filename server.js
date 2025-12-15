@@ -24,22 +24,22 @@ const TRACKS = {
   srulivnetanel: { id: "srulivnetanel", name: "Sruli & Netanel", file: "Sruli V'Netanel.mp3", duration: 206000 }
 };
 
-const START_LEAD_MS = 2500;   // NEW track starts use countdown
+const START_LEAD_MS = 2500;
 const PRELOAD_LEAD_MS = 2500;
 
 let state = {
   playing: false,
   paused: false,
   trackId: null,
-  startTime: null,   // epoch ms where track position=0
-  pausedAtMs: 0,     // elapsed ms when paused
+  startTime: null,      // epoch ms where track position=0
+  pausedAtMs: 0,        // elapsed ms when paused
   playlist: ["tyh"],
   playlistIndex: 0
 };
 
 const clients = new Set();
 const admins = new Set();
-const clientNames = new Map(); // ws -> name
+const clientNames = new Map();
 
 let nextTimer = null;
 let preloadTimer = null;
@@ -68,10 +68,7 @@ function clearTimers() {
 
 function currentElapsedMs() {
   if (!state.playing || !state.trackId || !state.startTime) return 0;
-
-  // ✅ IMPORTANT: if startTime is in the future (countdown), elapsed should be 0 (not negative)
-  const elapsed = Math.max(0, Date.now() - state.startTime);
-
+  const elapsed = Math.max(0, Date.now() - state.startTime); // clamp countdown to 0
   if (state.paused) return Math.max(0, state.pausedAtMs);
   return elapsed;
 }
@@ -118,7 +115,6 @@ function startTrack(trackId) {
   state.trackId = trackId;
   state.pausedAtMs = 0;
 
-  // NEW starts: countdown lead-in
   state.startTime = Date.now() + START_LEAD_MS;
 
   broadcast(clients, { type: "play", trackId, startTime: state.startTime });
@@ -146,22 +142,47 @@ function pauseAll() {
 
   clearTimers();
   state.paused = true;
-
-  // ✅ CRITICAL FIX: never store negative paused time (pause during countdown => 0)
-  state.pausedAtMs = currentElapsedMs();
+  state.pausedAtMs = currentElapsedMs(); // never negative
 
   broadcast(clients, { type: "pause", pausedAtMs: state.pausedAtMs });
   broadcast(admins, { type: "pause", pausedAtMs: state.pausedAtMs });
   broadcastState();
 }
 
-// ✅ Resume continues correctly and is instant
 function resumeAll() {
   if (!state.playing || !state.paused || !state.trackId) return;
 
-  // startTime such that "now" corresponds to paused position
   state.startTime = Date.now() - Math.max(0, state.pausedAtMs);
   state.paused = false;
+
+  broadcast(clients, { type: "play", trackId: state.trackId, startTime: state.startTime });
+  broadcast(admins, { type: "play", trackId: state.trackId, startTime: state.startTime });
+  broadcastState();
+
+  scheduleAutoAdvance();
+}
+
+// ✅ NEW: Seek (admin only)
+// If playing: broadcast a new play with updated startTime so everyone jumps.
+// If paused: just update pausedAtMs so resume continues from slider.
+function seekToMs(ms) {
+  if (!state.playing || !state.trackId) return;
+  const t = TRACKS[state.trackId];
+  if (!t?.duration) return;
+
+  const clamped = Math.max(0, Math.min(Number(ms) || 0, t.duration));
+
+  if (state.paused) {
+    state.pausedAtMs = clamped;
+    broadcast(clients, { type: "pause", pausedAtMs: state.pausedAtMs });
+    broadcast(admins, { type: "pause", pausedAtMs: state.pausedAtMs });
+    broadcastState();
+    return;
+  }
+
+  // Live seek: make "now" correspond to new position
+  clearTimers();
+  state.startTime = Date.now() - clamped;
 
   broadcast(clients, { type: "play", trackId: state.trackId, startTime: state.startTime });
   broadcast(admins, { type: "play", trackId: state.trackId, startTime: state.startTime });
@@ -231,6 +252,11 @@ wss.on("connection", (ws) => {
       if (!state.playing) return;
       if (!state.paused) return pauseAll();
       return resumeAll();
+    }
+
+    if (msg.type === "seek") {
+      // msg.positionMs required
+      return seekToMs(msg.positionMs);
     }
 
     if (msg.type === "next") return advanceToNextTrack();

@@ -52,48 +52,14 @@ const monitorStatus = document.getElementById("monitorStatus");
 let monitorEnabled = false;
 let monitorCurrentTrackId = null;
 
-monitorVol.oninput = () => {
-  adminAudio.volume = Number(monitorVol.value);
-};
+// ===== Seek UI =====
+const seekSlider = document.getElementById("seekSlider");
+const seekTime = document.getElementById("seekTime");
 
-monitorBtn.onclick = async () => {
-  // Toggle on/off
-  monitorEnabled = !monitorEnabled;
+let isDraggingSeek = false;
+let lastSeekSentAt = 0;
 
-  if (!monitorEnabled) {
-    try { adminAudio.pause(); } catch {}
-    monitorBtn.textContent = "Enable Monitor Audio";
-    monitorStatus.textContent = "Monitor: Off";
-    return;
-  }
-
-  // Enable: must do a user gesture play to unlock on Safari
-  adminAudio.volume = Number(monitorVol.value);
-
-  try {
-    // Use a tiny unlock sound if you have chime.mp3, otherwise just play/pause current
-    adminAudio.src = "chime.mp3";
-    adminAudio.currentTime = 0;
-    await adminAudio.play();
-    adminAudio.pause();
-    adminAudio.removeAttribute("src");
-    adminAudio.load();
-    monitorCurrentTrackId = null;
-
-    monitorBtn.textContent = "Disable Monitor Audio";
-    monitorStatus.textContent = "Monitor: On";
-
-    // Immediately sync to broadcast if live
-    await syncMonitorToState();
-  } catch {
-    // If blocked, user needs to click again
-    monitorEnabled = false;
-    monitorBtn.textContent = "Enable Monitor Audio";
-    monitorStatus.textContent = "Monitor: Off (blocked)";
-  }
-};
-
-// ===== Time sync (same as before) =====
+// ===== Time sync =====
 let serverOffsetMs = 0;
 let bestRttMs = Infinity;
 
@@ -110,7 +76,40 @@ function fmtTime(ms){
   const ss = String(d.getSeconds()).padStart(2,"0");
   return `${hh}:${mm}:${ss}`;
 }
+function fmtMMSS(ms){
+  ms = Math.max(0, Math.floor(ms));
+  const s = Math.floor(ms/1000);
+  const mm = String(Math.floor(s/60)).padStart(2,"0");
+  const ss = String(s%60).padStart(2,"0");
+  return `${mm}:${ss}`;
+}
 
+function trackDurationMs(){
+  const t = tracks[state.trackId];
+  return t?.duration || 0;
+}
+
+function currentPositionMs(){
+  if (!state.playing || !state.trackId || !state.startTime) return 0;
+  if (state.paused) {
+    // pausedAtMs is distributed via state (server)
+    // but we don't store it in state object; we infer it from slider/seek updates and server logic.
+    // We'll compute from time left in countdown if needed, otherwise use elapsed clamp.
+  }
+  const elapsed = Math.max(0, correctedNowMs() - state.startTime);
+  return elapsed;
+}
+
+function effectivePositionMs(){
+  // When paused: we want to display the slider's current value (what server is holding),
+  // but we do NOT get pausedAtMs in state directly. We'll keep it via lastPauseHoldMs.
+  if (state.paused) return lastPauseHoldMs;
+  return currentPositionMs();
+}
+
+let lastPauseHoldMs = 0;
+
+// ===== Top UI =====
 function renderTop(){
   const now = correctedNowMs();
   clockEl.textContent = fmtTime(now);
@@ -119,6 +118,10 @@ function renderTop(){
     countdownEl.textContent = "Countdown: —";
     nowPlayingEl.textContent = "Now Playing: —";
     pausePlayBtn.textContent = "PAUSE";
+    // reset seek UI
+    if (!isDraggingSeek) seekSlider.value = 0;
+    seekSlider.max = 1000;
+    seekTime.textContent = "00:00 / 00:00";
     return;
   }
 
@@ -128,17 +131,16 @@ function renderTop(){
   if (state.paused) {
     countdownEl.textContent = "Paused";
     pausePlayBtn.textContent = "PLAY";
-    return;
+  } else {
+    const leftMs = state.startTime - now;
+    if (leftMs > 0) countdownEl.textContent = `Countdown: ${(leftMs/1000).toFixed(1)}s`;
+    else countdownEl.textContent = "LIVE";
+    pausePlayBtn.textContent = "PAUSE";
   }
-
-  const leftMs = state.startTime - now;
-  if (leftMs > 0) countdownEl.textContent = `Countdown: ${(leftMs/1000).toFixed(1)}s`;
-  else countdownEl.textContent = "LIVE";
-
-  pausePlayBtn.textContent = "PAUSE";
 }
 setInterval(renderTop, 100);
 
+// ===== Tracks + playlist UI =====
 function renderTrackDropdown(){
   trackSelect.innerHTML = "";
   Object.values(tracks).forEach(t => {
@@ -208,11 +210,9 @@ addToPlaylistBtn.onclick = () => {
   pl.push(id);
   ws.send(JSON.stringify({ type:"setPlaylist", playlist: pl }));
 };
-
 playSelectedBtn.onclick = () => {
   ws.send(JSON.stringify({ type:"playTrack", trackId: trackSelect.value }));
 };
-
 pausePlayBtn.onclick = () => ws.send(JSON.stringify({ type:"togglePause" }));
 stopBtn.onclick = () => ws.send(JSON.stringify({ type:"stop" }));
 nextBtn.onclick = () => ws.send(JSON.stringify({ type:"next" }));
@@ -228,13 +228,46 @@ function renderClients(list){
   });
 }
 
-// =====================
-// Admin monitor sync logic (NEW)
-// =====================
+// ===== Admin monitor controls =====
+monitorVol.oninput = () => {
+  adminAudio.volume = Number(monitorVol.value);
+};
+
+monitorBtn.onclick = async () => {
+  monitorEnabled = !monitorEnabled;
+
+  if (!monitorEnabled) {
+    try { adminAudio.pause(); } catch {}
+    monitorBtn.textContent = "Enable Monitor Audio";
+    monitorStatus.textContent = "Monitor: Off";
+    return;
+  }
+
+  adminAudio.volume = Number(monitorVol.value);
+
+  try {
+    adminAudio.src = "chime.mp3";
+    adminAudio.currentTime = 0;
+    await adminAudio.play();
+    adminAudio.pause();
+    adminAudio.removeAttribute("src");
+    adminAudio.load();
+    monitorCurrentTrackId = null;
+
+    monitorBtn.textContent = "Disable Monitor Audio";
+    monitorStatus.textContent = "Monitor: On";
+    await syncMonitorToState();
+  } catch {
+    monitorEnabled = false;
+    monitorBtn.textContent = "Enable Monitor Audio";
+    monitorStatus.textContent = "Monitor: Off (blocked)";
+  }
+};
+
+// ===== Monitor sync logic =====
 function expectedOffsetSec(startTimeMs){
   return Math.max(0, (correctedNowMs() - startTimeMs) / 1000);
 }
-
 function waitAudioEvent(evt, timeoutMs=2500){
   return new Promise((resolve) => {
     const t = setTimeout(() => {
@@ -249,7 +282,6 @@ function waitAudioEvent(evt, timeoutMs=2500){
     adminAudio.addEventListener(evt, on, { once:true });
   });
 }
-
 async function ensureMonitorTrackReady(trackId){
   const t = tracks[trackId];
   if (!t) return false;
@@ -269,7 +301,6 @@ async function ensureMonitorTrackReady(trackId){
   }
   return true;
 }
-
 function clampSeekSeconds(trackId, seconds){
   const t = tracks[trackId];
   const durMs = t?.duration;
@@ -287,7 +318,6 @@ function clampSeekSeconds(trackId, seconds){
 async function syncMonitorToState(){
   if (!monitorEnabled) return;
 
-  // stop monitor if broadcast stopped
   if (!state.playing || !state.trackId || !state.startTime) {
     try { adminAudio.pause(); } catch {}
     adminAudio.removeAttribute("src");
@@ -297,7 +327,6 @@ async function syncMonitorToState(){
     return;
   }
 
-  // pause monitor if admin paused broadcast
   if (state.paused) {
     try { adminAudio.pause(); } catch {}
     monitorStatus.textContent = "Monitor: On (paused)";
@@ -309,32 +338,24 @@ async function syncMonitorToState(){
 
   const delayMs = Math.round(state.startTime - correctedNowMs());
 
-  // If countdown still in future, schedule start at 0
   if (delayMs > 0) {
     try { adminAudio.pause(); } catch {}
     monitorStatus.textContent = `Monitor: On (starts in ${(delayMs/1000).toFixed(1)}s)`;
-
-    // schedule play right on start
     setTimeout(async () => {
       if (!monitorEnabled) return;
       if (state.paused) return;
-      // track might have changed
       if (!state.playing || !state.trackId) return;
 
       await ensureMonitorTrackReady(state.trackId);
       try { adminAudio.currentTime = 0; } catch {}
       try { await adminAudio.play(); } catch {}
     }, delayMs);
-
     return;
   }
 
-  // Already started: seek to correct position and play
   const shouldBe = expectedOffsetSec(state.startTime);
   const target = clampSeekSeconds(state.trackId, shouldBe);
-
   try { adminAudio.currentTime = target; } catch {}
-
   try {
     if (adminAudio.paused) await adminAudio.play();
     monitorStatus.textContent = "Monitor: On (live)";
@@ -343,7 +364,7 @@ async function syncMonitorToState(){
   }
 }
 
-// Gentle drift correction for monitor audio
+// Drift correction for monitor audio
 setInterval(async () => {
   if (!monitorEnabled) return;
   if (!state.playing || state.paused || !state.trackId || !state.startTime) return;
@@ -354,13 +375,71 @@ setInterval(async () => {
   const actual = adminAudio.currentTime || 0;
   const drift = actual - target;
 
-  // admin monitor can be a bit looser
   if (Math.abs(drift) > 0.6) {
     try { adminAudio.currentTime = target; } catch {}
   }
 }, 1500);
 
-// WebSocket
+// ===== LIVE SEEK SLIDER logic =====
+function updateSeekUI(){
+  if (!state.playing || !state.trackId) return;
+
+  const dur = trackDurationMs();
+  if (dur <= 0) return;
+
+  const pos = Math.max(0, Math.min(effectivePositionMs(), dur));
+  const max = dur;
+
+  // slider uses 0..max (ms)
+  seekSlider.max = String(max);
+  if (!isDraggingSeek) seekSlider.value = String(Math.floor(pos));
+
+  seekTime.textContent = `${fmtMMSS(pos)} / ${fmtMMSS(max)}`;
+}
+
+setInterval(updateSeekUI, 100);
+
+// drag behavior
+seekSlider.addEventListener("input", () => {
+  isDraggingSeek = true;
+  const dur = Number(seekSlider.max) || 0;
+  const pos = Math.max(0, Math.min(Number(seekSlider.value) || 0, dur));
+  seekTime.textContent = `${fmtMMSS(pos)} / ${fmtMMSS(dur)}`;
+});
+
+// release -> send seek
+seekSlider.addEventListener("change", () => {
+  const dur = Number(seekSlider.max) || 0;
+  const pos = Math.max(0, Math.min(Number(seekSlider.value) || 0, dur));
+  isDraggingSeek = false;
+
+  // remember this as pause-hold when paused
+  lastPauseHoldMs = pos;
+
+  // rate limit if someone spams
+  const now = Date.now();
+  if (now - lastSeekSentAt < 150) return;
+  lastSeekSentAt = now;
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "seek", positionMs: pos }));
+  }
+
+  // update monitor immediately too (local)
+  if (monitorEnabled && state.trackId) {
+    (async () => {
+      await ensureMonitorTrackReady(state.trackId);
+      try { adminAudio.currentTime = pos / 1000; } catch {}
+    })();
+  }
+});
+
+// Keep lastPauseHoldMs accurate when pause arrives
+function onPauseHold(pausedAtMs){
+  lastPauseHoldMs = Math.max(0, Number(pausedAtMs) || 0);
+}
+
+// ===== WebSocket =====
 ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
 ws.onopen = () => {
@@ -390,20 +469,65 @@ ws.onmessage = async (e) => {
     return;
   }
 
-  if (msg.type === "state") {
-    state = msg.state || state;
-    renderPlaylist();
-    await syncMonitorToState();
-    return;
-  }
-
   if (msg.type === "clients") {
     renderClients(msg.list || []);
     return;
   }
 
+  if (msg.type === "state") {
+    state = msg.state || state;
+    renderPlaylist();
+
+    // if paused, keep a stable hold value (best guess)
+    if (state.paused) {
+      // estimate from startTime (clamped) if possible
+      const hold = Math.max(0, correctedNowMs() - (state.startTime || correctedNowMs()));
+      // but ONLY if we don't already have a known pause hold
+      if (!lastPauseHoldMs) lastPauseHoldMs = hold;
+    } else {
+      // when live, keep lastPauseHoldMs aligned so pause immediately looks right
+      lastPauseHoldMs = currentPositionMs();
+    }
+
+    await syncMonitorToState();
+    return;
+  }
+
+  if (msg.type === "pause") {
+    // server sends pausedAtMs here
+    onPauseHold(msg.pausedAtMs);
+    state.paused = true;
+    await syncMonitorToState();
+    return;
+  }
+
+  if (msg.type === "play") {
+    state.playing = true;
+    state.paused = false;
+    state.trackId = msg.trackId;
+    state.startTime = msg.startTime;
+    lastPauseHoldMs = currentPositionMs();
+    await syncMonitorToState();
+    return;
+  }
+
+  if (msg.type === "stop") {
+    state.playing = false;
+    state.paused = false;
+    state.trackId = null;
+    state.startTime = null;
+    lastPauseHoldMs = 0;
+    if (monitorEnabled) {
+      try { adminAudio.pause(); } catch {}
+      adminAudio.removeAttribute("src");
+      adminAudio.load();
+      monitorCurrentTrackId = null;
+      monitorStatus.textContent = "Monitor: On (idle)";
+    }
+    return;
+  }
+
   if (msg.type === "preload") {
-    // best-effort preload next track for monitor
     const t = tracks[msg.trackId];
     if (t) {
       try {
@@ -413,11 +537,5 @@ ws.onmessage = async (e) => {
         a.load();
       } catch {}
     }
-    return;
-  }
-
-  if (msg.type === "play" || msg.type === "pause" || msg.type === "stop") {
-    // state updates already handle it; keep monitor synced
-    await syncMonitorToState();
   }
 };

@@ -72,10 +72,10 @@
   }
   #clock{ font-size:44px; font-weight:900; letter-spacing:1px; margin-top:6px; }
   #countdown{ font-size:20px; font-weight:900; color:rgba(255,255,255,0.85); margin-top:4px; }
+
   .cols{ display:grid; grid-template-columns: 1.2fr 0.8fr; gap:14px; }
   @media (max-width: 900px){ .cols{ grid-template-columns: 1fr; } }
 
-  /* Playlist list */
   #playlist{
     list-style:none;
     padding:0;
@@ -93,19 +93,9 @@
     border:1px solid rgba(255,255,255,0.14);
     background:rgba(0,0,0,0.35);
   }
-  .handle{
-    cursor:grab;
-    user-select:none;
-    font-weight:900;
-    opacity:0.85;
-  }
+  .handle{ cursor:grab; user-select:none; font-weight:900; opacity:0.85; }
   .pl-name{ flex:1; font-weight:900; }
-  .pl-actions button{
-    min-width:unset;
-    padding:8px 10px;
-    border-radius:10px;
-    font-size:14px;
-  }
+  .pl-actions button{ min-width:unset; padding:8px 10px; border-radius:10px; font-size:14px; }
 
   /* PIN overlay (NOT saved) */
   #pinGate{
@@ -125,35 +115,36 @@
     padding:16px;
     text-align:center;
   }
-  #pinCard h2{
-    margin:0 0 10px;
-    color:var(--accent);
-    font-weight:900;
-  }
-  #pinMsg{
-    margin-top:10px;
-    color:rgba(255,120,120,0.9);
-    font-weight:900;
-    display:none;
-  }
+  #pinCard h2{ margin:0 0 10px; color:var(--accent); font-weight:900; }
+  #pinMsg{ margin-top:10px; color:rgba(255,120,120,0.9); font-weight:900; display:none; }
 
-  /* Admin audio monitor strip */
-  .monitor{
-    margin-top:10px;
+  /* Monitor & seek */
+  .monitor{ margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  #monitorBtn{ min-width:190px; }
+  #monitorVol{ width:220px; }
+
+  .seekWrap{
+    margin-top:12px;
+    padding:12px;
+    border-radius:14px;
+    border:1px solid rgba(255,255,255,0.14);
+    background:rgba(0,0,0,0.28);
+  }
+  .seekTop{
     display:flex;
+    justify-content:space-between;
+    align-items:center;
     gap:10px;
     flex-wrap:wrap;
-    align-items:center;
+    margin-bottom:8px;
   }
-  .monitor small{
-    opacity:0.85;
+  #seekSlider{
+    width:100%;
+    height:8px;
+  }
+  .mono{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-weight:900;
-  }
-  #monitorBtn{
-    min-width:180px;
-  }
-  #monitorVol{
-    width:220px;
   }
 </style>
 </head>
@@ -164,21 +155,32 @@
 
   <div class="card">
     <div class="row" style="justify-content:space-between;">
-      <div>
+      <div style="flex:1; min-width:280px;">
         <div class="pill" id="nowPlaying">Now Playing: —</div>
         <div id="clock">--:--:--</div>
         <div id="countdown">Countdown: —</div>
 
-        <!-- Admin monitor controls -->
         <div class="monitor">
           <button id="monitorBtn" class="gray">Enable Monitor Audio</button>
-          <small>Volume</small>
-          <input id="monitorVol" type="range" min="0" max="1" step="0.01" value="0.9">
           <span class="pill" id="monitorStatus">Monitor: Off</span>
+          <span style="opacity:.85; font-weight:900;">Volume</span>
+          <input id="monitorVol" type="range" min="0" max="1" step="0.01" value="0.9">
+        </div>
+
+        <!-- ✅ LIVE SEEK SLIDER -->
+        <div class="seekWrap">
+          <div class="seekTop">
+            <span class="pill">Seek / Position</span>
+            <span class="mono" id="seekTime">00:00 / 00:00</span>
+          </div>
+          <input id="seekSlider" type="range" min="0" max="1000" value="0">
+          <div style="margin-top:8px; opacity:.85; font-weight:900;">
+            Drag the slider to seek. If paused, resume continues from this position.
+          </div>
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" style="align-items:flex-start;">
         <button id="pausePlayBtn" class="gray">PAUSE</button>
         <button id="backBtn" class="gray">⏮ Back</button>
         <button id="nextBtn" class="gray">Next ⏭</button>
@@ -225,7 +227,6 @@
   </div>
 </div>
 
-<!-- ✅ Admin audio element (hidden) -->
 <audio id="adminPlayer" preload="auto"></audio>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
