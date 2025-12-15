@@ -188,7 +188,9 @@
     <div style="color:rgba(255,255,255,0.85); font-weight:800; margin-bottom:10px;">
       Enter PIN to open admin controls
     </div>
-    <input id="pinInput" inputmode="numeric" autocomplete="one-time-code" placeholder="PIN (130865)" style="width:90%; text-align:center;">
+    <!-- ✅ placeholder no longer shows the real code -->
+    <input id="pinInput" inputmode="numeric" autocomplete="one-time-code"
+           placeholder="Enter PIN" style="width:90%; text-align:center;">
     <div style="height:10px;"></div>
     <button id="pinBtn" style="width:94%;">Unlock</button>
     <div id="pinMsg">Wrong PIN</div>

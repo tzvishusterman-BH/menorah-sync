@@ -24,15 +24,15 @@ const TRACKS = {
   srulivnetanel: { id: "srulivnetanel", name: "Sruli & Netanel", file: "Sruli V'Netanel.mp3", duration: 206000 }
 };
 
-const START_LEAD_MS = 2500;          // NEW track starts use countdown
-const PRELOAD_LEAD_MS = 2500;        // send preload hint before end
+const START_LEAD_MS = 2500;   // NEW track starts use countdown
+const PRELOAD_LEAD_MS = 2500;
 
 let state = {
   playing: false,
   paused: false,
   trackId: null,
-  startTime: null,      // epoch ms where track position=0
-  pausedAtMs: 0,        // elapsed ms when paused
+  startTime: null,   // epoch ms where track position=0
+  pausedAtMs: 0,     // elapsed ms when paused
   playlist: ["tyh"],
   playlistIndex: 0
 };
@@ -68,8 +68,12 @@ function clearTimers() {
 
 function currentElapsedMs() {
   if (!state.playing || !state.trackId || !state.startTime) return 0;
+
+  // ✅ IMPORTANT: if startTime is in the future (countdown), elapsed should be 0 (not negative)
+  const elapsed = Math.max(0, Date.now() - state.startTime);
+
   if (state.paused) return Math.max(0, state.pausedAtMs);
-  return Math.max(0, Date.now() - state.startTime);
+  return elapsed;
 }
 
 function getNextTrackId() {
@@ -91,7 +95,6 @@ function scheduleAutoAdvance() {
   const elapsed = currentElapsedMs();
   const remaining = Math.max(0, t.duration - elapsed);
 
-  // preload hint shortly before end
   const nextId = getNextTrackId();
   if (nextId) {
     const inMs = Math.max(0, remaining - PRELOAD_LEAD_MS);
@@ -143,6 +146,8 @@ function pauseAll() {
 
   clearTimers();
   state.paused = true;
+
+  // ✅ CRITICAL FIX: never store negative paused time (pause during countdown => 0)
   state.pausedAtMs = currentElapsedMs();
 
   broadcast(clients, { type: "pause", pausedAtMs: state.pausedAtMs });
@@ -150,12 +155,12 @@ function pauseAll() {
   broadcastState();
 }
 
-// ✅ Resume continues (does NOT restart), instant
+// ✅ Resume continues correctly and is instant
 function resumeAll() {
   if (!state.playing || !state.paused || !state.trackId) return;
 
   // startTime such that "now" corresponds to paused position
-  state.startTime = Date.now() - state.pausedAtMs;
+  state.startTime = Date.now() - Math.max(0, state.pausedAtMs);
   state.paused = false;
 
   broadcast(clients, { type: "play", trackId: state.trackId, startTime: state.startTime });
@@ -194,7 +199,6 @@ wss.on("connection", (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // time sync for accurate clock offset
     if (msg.type === "timeSync") {
       send(ws, { type: "timeSync", clientSend: msg.clientSend, serverTime: Date.now() });
       return;
@@ -235,10 +239,8 @@ wss.on("connection", (ws) => {
     if (msg.type === "playTrack") {
       const id = msg.trackId;
       if (!TRACKS[id]) return;
-
       const idx = (state.playlist || []).indexOf(id);
       if (idx >= 0) state.playlistIndex = idx;
-
       return startTrack(id);
     }
 
