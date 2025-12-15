@@ -75,6 +75,7 @@
   .cols{ display:grid; grid-template-columns: 1.2fr 0.8fr; gap:14px; }
   @media (max-width: 900px){ .cols{ grid-template-columns: 1fr; } }
 
+  /* Playlist list */
   #playlist{
     list-style:none;
     padding:0;
@@ -135,6 +136,25 @@
     font-weight:900;
     display:none;
   }
+
+  /* Admin audio monitor strip */
+  .monitor{
+    margin-top:10px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    align-items:center;
+  }
+  .monitor small{
+    opacity:0.85;
+    font-weight:900;
+  }
+  #monitorBtn{
+    min-width:180px;
+  }
+  #monitorVol{
+    width:220px;
+  }
 </style>
 </head>
 
@@ -148,7 +168,16 @@
         <div class="pill" id="nowPlaying">Now Playing: —</div>
         <div id="clock">--:--:--</div>
         <div id="countdown">Countdown: —</div>
+
+        <!-- Admin monitor controls -->
+        <div class="monitor">
+          <button id="monitorBtn" class="gray">Enable Monitor Audio</button>
+          <small>Volume</small>
+          <input id="monitorVol" type="range" min="0" max="1" step="0.01" value="0.9">
+          <span class="pill" id="monitorStatus">Monitor: Off</span>
+        </div>
       </div>
+
       <div class="row">
         <button id="pausePlayBtn" class="gray">PAUSE</button>
         <button id="backBtn" class="gray">⏮ Back</button>
@@ -188,7 +217,6 @@
     <div style="color:rgba(255,255,255,0.85); font-weight:800; margin-bottom:10px;">
       Enter PIN to open admin controls
     </div>
-    <!-- ✅ placeholder no longer shows the real code -->
     <input id="pinInput" inputmode="numeric" autocomplete="one-time-code"
            placeholder="Enter PIN" style="width:90%; text-align:center;">
     <div style="height:10px;"></div>
@@ -196,6 +224,9 @@
     <div id="pinMsg">Wrong PIN</div>
   </div>
 </div>
+
+<!-- ✅ Admin audio element (hidden) -->
+<audio id="adminPlayer" preload="auto"></audio>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script src="admin.js"></script>

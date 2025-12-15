@@ -43,6 +43,57 @@ const playlistEl = document.getElementById("playlist");
 const clientsEl = document.getElementById("clients");
 const carsCountEl = document.getElementById("carsCount");
 
+// ===== Admin audio monitor =====
+const adminAudio = document.getElementById("adminPlayer");
+const monitorBtn = document.getElementById("monitorBtn");
+const monitorVol = document.getElementById("monitorVol");
+const monitorStatus = document.getElementById("monitorStatus");
+
+let monitorEnabled = false;
+let monitorCurrentTrackId = null;
+
+monitorVol.oninput = () => {
+  adminAudio.volume = Number(monitorVol.value);
+};
+
+monitorBtn.onclick = async () => {
+  // Toggle on/off
+  monitorEnabled = !monitorEnabled;
+
+  if (!monitorEnabled) {
+    try { adminAudio.pause(); } catch {}
+    monitorBtn.textContent = "Enable Monitor Audio";
+    monitorStatus.textContent = "Monitor: Off";
+    return;
+  }
+
+  // Enable: must do a user gesture play to unlock on Safari
+  adminAudio.volume = Number(monitorVol.value);
+
+  try {
+    // Use a tiny unlock sound if you have chime.mp3, otherwise just play/pause current
+    adminAudio.src = "chime.mp3";
+    adminAudio.currentTime = 0;
+    await adminAudio.play();
+    adminAudio.pause();
+    adminAudio.removeAttribute("src");
+    adminAudio.load();
+    monitorCurrentTrackId = null;
+
+    monitorBtn.textContent = "Disable Monitor Audio";
+    monitorStatus.textContent = "Monitor: On";
+
+    // Immediately sync to broadcast if live
+    await syncMonitorToState();
+  } catch {
+    // If blocked, user needs to click again
+    monitorEnabled = false;
+    monitorBtn.textContent = "Enable Monitor Audio";
+    monitorStatus.textContent = "Monitor: Off (blocked)";
+  }
+};
+
+// ===== Time sync (same as before) =====
 let serverOffsetMs = 0;
 let bestRttMs = Infinity;
 
@@ -177,6 +228,138 @@ function renderClients(list){
   });
 }
 
+// =====================
+// Admin monitor sync logic (NEW)
+// =====================
+function expectedOffsetSec(startTimeMs){
+  return Math.max(0, (correctedNowMs() - startTimeMs) / 1000);
+}
+
+function waitAudioEvent(evt, timeoutMs=2500){
+  return new Promise((resolve) => {
+    const t = setTimeout(() => {
+      adminAudio.removeEventListener(evt, on);
+      resolve(false);
+    }, timeoutMs);
+    function on(){
+      clearTimeout(t);
+      adminAudio.removeEventListener(evt, on);
+      resolve(true);
+    }
+    adminAudio.addEventListener(evt, on, { once:true });
+  });
+}
+
+async function ensureMonitorTrackReady(trackId){
+  const t = tracks[trackId];
+  if (!t) return false;
+
+  const same = (monitorCurrentTrackId === trackId) &&
+    adminAudio.src && adminAudio.src.includes(encodeURI(t.file));
+
+  if (!same) {
+    try { adminAudio.pause(); } catch {}
+    adminAudio.src = t.file;
+    adminAudio.load();
+    monitorCurrentTrackId = trackId;
+  }
+
+  if (!Number.isFinite(adminAudio.duration) || adminAudio.duration === 0) {
+    await waitAudioEvent("loadedmetadata", 3000);
+  }
+  return true;
+}
+
+function clampSeekSeconds(trackId, seconds){
+  const t = tracks[trackId];
+  const durMs = t?.duration;
+  if (typeof durMs === "number" && durMs > 0) {
+    const max = Math.max(0, (durMs/1000) - 0.25);
+    return Math.min(Math.max(0, seconds), max);
+  }
+  if (Number.isFinite(adminAudio.duration) && adminAudio.duration > 0) {
+    const max = Math.max(0, adminAudio.duration - 0.25);
+    return Math.min(Math.max(0, seconds), max);
+  }
+  return Math.max(0, seconds);
+}
+
+async function syncMonitorToState(){
+  if (!monitorEnabled) return;
+
+  // stop monitor if broadcast stopped
+  if (!state.playing || !state.trackId || !state.startTime) {
+    try { adminAudio.pause(); } catch {}
+    adminAudio.removeAttribute("src");
+    adminAudio.load();
+    monitorCurrentTrackId = null;
+    monitorStatus.textContent = "Monitor: On (idle)";
+    return;
+  }
+
+  // pause monitor if admin paused broadcast
+  if (state.paused) {
+    try { adminAudio.pause(); } catch {}
+    monitorStatus.textContent = "Monitor: On (paused)";
+    return;
+  }
+
+  const ok = await ensureMonitorTrackReady(state.trackId);
+  if (!ok) return;
+
+  const delayMs = Math.round(state.startTime - correctedNowMs());
+
+  // If countdown still in future, schedule start at 0
+  if (delayMs > 0) {
+    try { adminAudio.pause(); } catch {}
+    monitorStatus.textContent = `Monitor: On (starts in ${(delayMs/1000).toFixed(1)}s)`;
+
+    // schedule play right on start
+    setTimeout(async () => {
+      if (!monitorEnabled) return;
+      if (state.paused) return;
+      // track might have changed
+      if (!state.playing || !state.trackId) return;
+
+      await ensureMonitorTrackReady(state.trackId);
+      try { adminAudio.currentTime = 0; } catch {}
+      try { await adminAudio.play(); } catch {}
+    }, delayMs);
+
+    return;
+  }
+
+  // Already started: seek to correct position and play
+  const shouldBe = expectedOffsetSec(state.startTime);
+  const target = clampSeekSeconds(state.trackId, shouldBe);
+
+  try { adminAudio.currentTime = target; } catch {}
+
+  try {
+    if (adminAudio.paused) await adminAudio.play();
+    monitorStatus.textContent = "Monitor: On (live)";
+  } catch {
+    monitorStatus.textContent = "Monitor: On (blocked)";
+  }
+}
+
+// Gentle drift correction for monitor audio
+setInterval(async () => {
+  if (!monitorEnabled) return;
+  if (!state.playing || state.paused || !state.trackId || !state.startTime) return;
+  if (adminAudio.paused) return;
+
+  const shouldBe = expectedOffsetSec(state.startTime);
+  const target = clampSeekSeconds(state.trackId, shouldBe);
+  const actual = adminAudio.currentTime || 0;
+  const drift = actual - target;
+
+  // admin monitor can be a bit looser
+  if (Math.abs(drift) > 0.6) {
+    try { adminAudio.currentTime = target; } catch {}
+  }
+}, 1500);
+
 // WebSocket
 ws = new WebSocket(location.origin.replace(/^http/, "ws"));
 
@@ -186,7 +369,7 @@ ws.onopen = () => {
   setInterval(timeSyncOnce, 2000);
 };
 
-ws.onmessage = (e) => {
+ws.onmessage = async (e) => {
   const msg = JSON.parse(e.data);
 
   if (msg.type === "timeSync") {
@@ -210,11 +393,31 @@ ws.onmessage = (e) => {
   if (msg.type === "state") {
     state = msg.state || state;
     renderPlaylist();
+    await syncMonitorToState();
     return;
   }
 
   if (msg.type === "clients") {
     renderClients(msg.list || []);
     return;
+  }
+
+  if (msg.type === "preload") {
+    // best-effort preload next track for monitor
+    const t = tracks[msg.trackId];
+    if (t) {
+      try {
+        const a = new Audio();
+        a.preload = "auto";
+        a.src = t.file;
+        a.load();
+      } catch {}
+    }
+    return;
+  }
+
+  if (msg.type === "play" || msg.type === "pause" || msg.type === "stop") {
+    // state updates already handle it; keep monitor synced
+    await syncMonitorToState();
   }
 };
